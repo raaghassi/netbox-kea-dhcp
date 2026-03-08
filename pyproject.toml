@@ -34,8 +34,8 @@ netbox-kea-dhcp = "netboxkea.entry_point:run"
 [tool.hatch.version]
 path = "src/netboxkea/__about__.py"
 
-[tool.hatch.build]
-sources = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/netboxkea"]
 
-[tool.hatch.build.force-include]
-"examples/" = "examples"
+[tool.hatch.build.targets.sdist]
+include = ["src/", "README.md", "LICENSE"]
