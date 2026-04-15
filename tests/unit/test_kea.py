@@ -40,6 +40,8 @@ class TestKea(unittest.TestCase):
                     raise ValueError(cmd)
 
         self.req.side_effect = req_result
+        self.del_lease = MagicMock()
+        self.kea.api.del_lease4 = self.del_lease
         self.kea.pull()
         self.req.reset_mock()
 
@@ -174,6 +176,30 @@ class TestKea(unittest.TestCase):
         self._set_std_resa()
         self.kea.del_resa(200)
         self.assertEqual(len(self.kea.conf['subnet4'][0]['reservations']), 0)
+        self.del_lease.assert_called_once_with('192.168.0.1')
+
+    def test_27_del_reservation_no_lease_delete_when_missing(self):
+        self._set_std_subnet()
+        self.kea.del_resa(999)
+        self.del_lease.assert_not_called()
+
+    def test_28_set_reservation_mac_change_deletes_lease(self):
+        self._set_std_subnet()
+        self._set_std_resa()
+        self.del_lease.reset_mock()
+        self.kea.set_reservation(100, 200, {
+            'ip-address': '192.168.0.1', 'hw-address': 'aa:bb:cc:dd:ee:ff',
+            'hostname': 'pc.lan'})
+        self.del_lease.assert_called_once_with('192.168.0.1')
+
+    def test_29_set_reservation_same_mac_no_lease_delete(self):
+        self._set_std_subnet()
+        self._set_std_resa()
+        self.del_lease.reset_mock()
+        self.kea.set_reservation(100, 200, {
+            'ip-address': '192.168.0.1', 'hw-address': '11:22:33:44:55:66',
+            'hostname': 'pc-new.lan'})
+        self.del_lease.assert_not_called()
 
     def test_30_set_pool(self):
         expected = {'subnet4': [

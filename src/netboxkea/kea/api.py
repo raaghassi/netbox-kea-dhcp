@@ -34,6 +34,10 @@ class FileAPI:
             with open(self.config_file, 'w') as f:
                 json.dump(self.conf, f, indent=4)
 
+    def del_lease4(self, ip_address):
+        """ No-op for file-based API (no lease database) """
+        pass
+
 
 class DHCP4API:
     def __init__(self, url):
@@ -78,6 +82,27 @@ class DHCP4API:
         self._request_kea('config-set', {'Dhcp4': config})
 
     def write_conf(self):
-        """ On DHCP server write configuration to persitent storage """
+        """ On DHCP server write configuration to persistent storage """
 
         self._request_kea('config-write')
+
+    def del_lease4(self, ip_address):
+        """ Delete an IPv4 lease. Ignores non-existent leases (result 3). """
+
+        payload = {'command': 'lease4-del', 'service': ['dhcp4'],
+                   'arguments': {'ip-address': ip_address}}
+        try:
+            r = self.session.post(self.url, json=payload)
+            r.raise_for_status()
+            rj = r.json()
+        except requests.exceptions.RequestException as e:
+            raise KeaServerError(f'API error: {e}')
+        assert len(rj) == 1
+        rj = rj.pop(0)
+        result, text = rj['result'], rj.get('text')
+        if result == 0:
+            logging.info(f'lease4-del {ip_address}: {text}')
+        elif result == 3:
+            logging.debug(f'lease4-del {ip_address}: {text}')
+        else:
+            raise KeaCmdError(f'command "lease4-del" returns "{text}"')

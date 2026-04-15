@@ -222,6 +222,21 @@ class DHCP4App:
 
         resa_item.setdefault(USR_CTX, {})[IP_ADDR] = ipaddr_id
 
+        # If replacing a reservation whose MAC changed, delete the stale
+        # lease so Kea can assign the reserved IP to the new MAC.
+        for s in self.conf[SUBNETS]:
+            if s[PREFIX] == prefix_id:
+                for r in s[RESAS]:
+                    if (r[USR_CTX][IP_ADDR] == ipaddr_id and
+                            r.get('hw-address') != resa_item['hw-address']):
+                        ip = r.get('ip-address')
+                        if ip:
+                            logging.info(
+                                f'reservation {ipaddr_id}: MAC changed, '
+                                f'deleting stale lease for {ip}')
+                            self.api.del_lease4(ip)
+                break
+
         def raise_conflict(r):
             if r.get('hw-address') == resa_item['hw-address']:
                 raise DuplicateValue(
@@ -236,6 +251,14 @@ class DHCP4App:
 
     @_autocommit
     def del_resa(self, ipaddr_id):
+        # Delete any lease for the reserved IP before removing the
+        # reservation, so stale leases don't block future reservations.
+        for s in self.conf[SUBNETS]:
+            for r in s[RESAS]:
+                if r[USR_CTX][IP_ADDR] == ipaddr_id:
+                    ip = r.get('ip-address')
+                    if ip:
+                        self.api.del_lease4(ip)
         self._del_prefix_item(RESAS, IP_ADDR, ipaddr_id)
 
     def _set_subnet_item(self, prefix_id, item_list, item_key, item_id, new,
