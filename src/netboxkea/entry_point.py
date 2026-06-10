@@ -3,6 +3,7 @@ import logging
 from .config import get_config
 from .connector import Connector
 from .kea.app import DHCP4App
+from .kea.cb import DHCP4CB
 from .listener import WebhookListener
 from .logger import init_logger
 from .netbox import NetboxApp
@@ -13,12 +14,14 @@ def run():
     init_logger(conf.log_level, conf.ext_log_level, conf.syslog_level_prefix)
 
     # Instanciate source, sink and connector
-    logging.info(f'netbox: {conf.netbox_url}, kea: {conf.kea_url}')
+    kea_target = conf.kea_db if conf.kea_db else conf.kea_url
+    logging.info(f'netbox: {conf.netbox_url}, kea: {kea_target}')
     nb = NetboxApp(
         conf.netbox_url, conf.netbox_token, prefix_filter=conf.prefix_filter,
         iprange_filter=conf.iprange_filter,
         ipaddress_filter=conf.ipaddress_filter)
-    kea = DHCP4App(conf.kea_url)
+    # config backend (direct DB) when kea_db is set, else control agent (config-set)
+    kea = DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url)
     conn = Connector(
         nb, kea, conf.subnet_prefix_map, conf.pool_iprange_map,
         conf.reservation_ipaddr_map, check=conf.check_only)

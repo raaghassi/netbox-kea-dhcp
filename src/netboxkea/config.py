@@ -24,6 +24,9 @@ class Config:
     ext_log_level: str = 'warning'
     syslog_level_prefix: bool = False
     kea_url: str = None
+    # libpq DSN for the Kea config backend (alternative to kea_url's control
+    # agent). When set, subnets are written directly to Kea's PostgreSQL CB.
+    kea_db: str = None
     netbox_url: str = None
     netbox_token: str = None
     prefix_filter: dict = field(default_factory=lambda: {
@@ -61,6 +64,9 @@ def get_config():
     parser.add_argument('-t', '--netbox-token', help='')
     parser.add_argument('-k', '--kea-url', help='')
     parser.add_argument(
+        '-d', '--kea-db',
+        help='libpq DSN for the Kea config backend (alternative to --kea-url)')
+    parser.add_argument(
         '-l', '--listen', action='store_true', default=None, help='')
     parser.add_argument('-b', '--bind', help='')
     parser.add_argument('-p', '--port', type=int, help='')
@@ -97,12 +103,16 @@ def get_config():
     settings.update({k: v for k, v in args.__dict__.items() if v is not None})
 
     # Check existence of required settings
-    for attr in ('kea_url', 'netbox_url'):
-        if attr not in settings:
-            logging.fatal(
-                f'Setting "{attr}" not found, neither on command line '
-                'arguments nor in configuration file (if any)')
-            sys.exit(1)
+    if 'netbox_url' not in settings:
+        logging.fatal(
+            'Setting "netbox_url" not found, neither on command line '
+            'arguments nor in configuration file (if any)')
+        sys.exit(1)
+    if 'kea_url' not in settings and 'kea_db' not in settings:
+        logging.fatal(
+            'Either "kea_url" (control agent) or "kea_db" (config backend DSN) '
+            'must be set, on command line arguments or in the config file')
+        sys.exit(1)
 
     conf = Config(**settings)
 
