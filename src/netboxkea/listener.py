@@ -63,7 +63,31 @@ class WebhookListener:
 
             # Push change to DHCP server
             self.conn.push_to_dhcp()
-        
+
+        @bottle.route('/lease/', 'POST')
+        def new_lease():
+            """Reflect a Kea run_script lease event into NetBox (Kea -> NetBox).
+            Body: {"action": "add"|"del", "address", "hostname", "hwaddr"}."""
+
+            if (self.secret_header and bottle.request.get_header(
+                    self.secret_header) != self.secret):
+                self._abort(403, 'wrong secret or secret header')
+            try:
+                lease = bottle.request.json
+            except JSONDecodeError:
+                lease = None
+            if not lease or 'address' not in lease:
+                self._abort(400, 'lease body missing "address" (or not JSON)')
+            logging.info(
+                f"lease event: {lease.get('action')} {lease.get('address')}")
+            try:
+                self.conn.sync_lease(lease)
+            except Exception as e:
+                logging.error(f'lease sync failed: {e}')
+                self._abort(500, 'lease sync failed')
+            bottle.response.status = 201
+            return 'ok'
+
         # very basic health check, basically proves bottle is already/still running
         # enough for Kubernetes probes
         @bottle.route('/health/')

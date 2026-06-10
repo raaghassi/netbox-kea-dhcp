@@ -44,3 +44,28 @@ class NetboxApp:
         for i in self.nb.ipam.ip_addresses.filter(
                 **self.ipaddress_filter, **filters):
             yield i
+
+    # --- Lease reflection (Kea -> NetBox): manage status=dhcp host IPs only, so
+    # statically-seeded reservations are never touched. ---
+
+    def upsert_dhcp_ip(self, address, dns_name=None, description=None):
+        """Create or update a DHCP-lease IP (status=dhcp). Idempotent on the
+        address; matches/creates only status=dhcp objects."""
+        data = {'status': 'dhcp'}
+        if dns_name:
+            data['dns_name'] = dns_name
+        if description:
+            data['description'] = description
+        existing = next(iter(self.nb.ipam.ip_addresses.filter(
+            address=address, status='dhcp')), None)
+        if existing:
+            existing.update(data)
+            return existing
+        data['address'] = address
+        return self.nb.ipam.ip_addresses.create(**data)
+
+    def delete_dhcp_ip(self, address):
+        """Delete DHCP-lease IP(s) at address (status=dhcp only)."""
+        for ip in self.nb.ipam.ip_addresses.filter(
+                address=address, status='dhcp'):
+            ip.delete()

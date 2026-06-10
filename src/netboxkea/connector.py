@@ -141,6 +141,24 @@ class Connector:
         i = self.nb.ip_address(id_)
         self._ipaddr_to_resa(i) if i else self.kea.del_resa(id_)
 
+    def sync_lease(self, lease):
+        """Reflect a Kea lease event into NetBox as a status=dhcp host IP
+        (Kea -> NetBox direction; does not touch Kea)."""
+        address = lease.get('address')
+        if not address:
+            return
+        addr = address if '/' in address else '{}/32'.format(address)
+        action = lease.get('action')
+        if action == 'add':
+            host = (lease.get('hostname') or '').strip() or None
+            mac = (lease.get('hwaddr') or '').strip()
+            desc = 'kea lease' + (' (mac {})'.format(mac) if mac else '')
+            self.nb.upsert_dhcp_ip(addr, dns_name=host, description=desc)
+        elif action == 'del':
+            self.nb.delete_dhcp_ip(addr)
+        else:
+            logging.warning('unknown lease action: {}'.format(action))
+
     def sync_interface(self, id_):
         for i in self.nb.ip_addresses(interface_id=id_):
             self.sync_ipaddress(i.id)
