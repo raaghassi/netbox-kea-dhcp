@@ -23,7 +23,8 @@ classifiers = [
 dependencies = [
     "pynetbox>=7.3.0",
     "bottle~=0.12.25",
-    "psycopg>=3.1"
+    "psycopg>=3.1",
+    "requests>=2.28"
 ]
 
 [project.urls]

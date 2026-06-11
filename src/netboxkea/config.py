@@ -27,6 +27,10 @@ class Config:
     # libpq DSN for the Kea config backend (alternative to kea_url's control
     # agent). When set, subnets are written directly to Kea's PostgreSQL CB.
     kea_db: str = None
+    # HTTP control URL of kea-dhcp-ddns (D2). When set, the syncer derives D2's
+    # forward/reverse-ddns domains from netbox-dns zones (ddns_enabled) and
+    # config-sets them. Unset = no DDNS-zone management.
+    ddns_d2_url: str = None
     netbox_url: str = None
     netbox_token: str = None
     prefix_filter: dict = field(default_factory=lambda: {
@@ -66,6 +70,10 @@ def get_config():
     parser.add_argument(
         '-d', '--kea-db',
         help='libpq DSN for the Kea config backend (alternative to --kea-url)')
+    parser.add_argument(
+        '--ddns-d2-url',
+        help='HTTP control URL of kea-dhcp-ddns; enables netbox-dns -> D2 '
+             'forward/reverse-ddns zone management')
     parser.add_argument(
         '-l', '--listen', action='store_true', default=None, help='')
     parser.add_argument('-b', '--bind', help='')

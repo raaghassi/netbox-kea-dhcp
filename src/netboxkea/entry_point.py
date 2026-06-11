@@ -2,6 +2,7 @@ import logging
 
 from .config import get_config
 from .connector import Connector
+from .ddns import DdnsManager
 from .kea.app import DHCP4App
 from .kea.cb import DHCP4CB
 from .listener import WebhookListener
@@ -22,9 +23,14 @@ def run():
         ipaddress_filter=conf.ipaddress_filter)
     # config backend (direct DB) when kea_db is set, else control agent (config-set)
     kea = DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url)
+    # Optional: manage kea-dhcp-ddns (D2) forward/reverse-ddns zones from netbox-dns.
+    ddns = None
+    if conf.ddns_d2_url:
+        logging.info(f'ddns: managing kea-dhcp-ddns at {conf.ddns_d2_url}')
+        ddns = DdnsManager(conf.netbox_url, conf.netbox_token, conf.ddns_d2_url)
     conn = Connector(
         nb, kea, conf.subnet_prefix_map, conf.pool_iprange_map,
-        conf.reservation_ipaddr_map, check=conf.check_only)
+        conf.reservation_ipaddr_map, check=conf.check_only, ddns=ddns)
 
     if not conf.full_sync_at_startup and not conf.listen:
         logging.warning('Neither full sync nor listen mode has been asked')
@@ -33,6 +39,11 @@ def run():
     if conf.full_sync_at_startup:
         logging.info('Start full sync')
         conn.sync_all()
+        if ddns:
+            try:
+                ddns.sync()
+            except Exception as e:
+                logging.error(f'initial D2 ddns sync failed: {e}')
 
     # Start listening for events
     if conf.listen:

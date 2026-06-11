@@ -69,13 +69,14 @@ class Connector:
     """ Main class that connects Netbox objects to Kea DHCP config items """
 
     def __init__(self, nb, kea, prefix_subnet_map, pool_iprange_map,
-                 reservation_ipaddr_map, check=False):
+                 reservation_ipaddr_map, check=False, ddns=None):
         self.nb = nb
         self.kea = kea
         self.subnet_prefix_map = prefix_subnet_map
         self.pool_iprange_map = pool_iprange_map
         self.reservation_ipaddr_map = reservation_ipaddr_map
         self.check = check
+        self.ddns = ddns
 
     def sync_all(self):
         """ Replace current DHCP configuration by a new generated one """
@@ -158,6 +159,12 @@ class Connector:
             self.nb.delete_dhcp_ip(addr)
         else:
             logging.warning('unknown lease action: {}'.format(action))
+
+    def sync_zone(self, id_):
+        """A netbox-dns zone changed (e.g. ddns_enabled toggled) -> re-derive
+        kea-dhcp-ddns's forward/reverse-ddns domains from the ddns_enabled zones."""
+        if self.ddns:
+            self.ddns.sync()
 
     def sync_interface(self, id_):
         for i in self.nb.ip_addresses(interface_id=id_):
