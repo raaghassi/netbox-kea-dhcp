@@ -31,8 +31,10 @@ kea_url = "http://10.94.135.209:8000/"
 # Prefixes pick their server via the NetBox custom field named by
 # server_tag_custom_field; without a value they go to default_server_tag;
 # unknown tags are skipped with a warning. Tags are lowercased; "all"/"any"
-# are reserved by Kea; 64 chars max. Two tags cannot share one config-backend
-# DSN (unsupported until CB writes are tag-scoped).
+# are reserved by Kea; 64 chars max. Each Kea instance owns its own
+# config-backend database by design (two tags cannot share one DSN);
+# whether those databases live on one PostgreSQL server or many is a
+# database-deployment concern, not this component's.
 # NOTE: keep the top-level keys BEFORE the [kea_servers.*] tables, or TOML
 # assigns them to the last table.
 #

@@ -107,8 +107,8 @@ def _normalize_kea_servers(raw):
         if dsn:
             if dsn in seen_dsn:
                 _fatal(f'kea_servers: tags "{seen_dsn[dsn]}" and "{ntag}" '
-                       'share one config-backend DSN — unsupported until '
-                       'the CB writer scopes writes per server tag')
+                       'share one config-backend DSN — by design each Kea '
+                       'instance owns its own config-backend database')
             seen_dsn[dsn] = ntag
         servers[ntag] = dict(spec)
     return servers
