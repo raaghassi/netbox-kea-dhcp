@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from netboxkea.entry_point import build_kea_backends
+from netboxkea.entry_point import build_ddns, build_kea_backends
 
 
 def _conf(**kw):
@@ -83,3 +83,22 @@ class TestBuildKeaBackends(unittest.TestCase):
         cb.assert_called_once_with(
             'dbname=kea', api_url='http://kea:8000/',
             api_username='syncer', api_password='s3cret')
+
+
+@patch('netboxkea.entry_point.DdnsManager')
+class TestBuildDdns(unittest.TestCase):
+
+    def test_01_none_without_url(self, ddns):
+        conf = _conf(ddns_d2_url=None)
+        self.assertIsNone(build_ddns(conf))
+        ddns.assert_not_called()
+
+    def test_02_credentials_passed_through(self, ddns):
+        conf = _conf(netbox_url='http://nb', netbox_token='tok',
+                     ddns_d2_url='http://d2:8001/',
+                     ddns_d2_username='syncer', ddns_d2_password='s3cret')
+        result = build_ddns(conf)
+        self.assertIs(result, ddns.return_value)
+        ddns.assert_called_once_with(
+            'http://nb', 'tok', 'http://d2:8001/', username='syncer',
+            password='s3cret')

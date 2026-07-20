@@ -159,6 +159,49 @@ kea_password_env = "KEA_CTRL_PW"
         self.assertEqual(conf.kea_password, 's3cret')
         self.assertEqual(conf.kea_username, 'syncer')
 
+    def test_14_literal_password_survives(self):
+        conf = _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+username = "syncer"
+password = "literal-pw"
+''')
+        self.assertEqual(conf.kea_servers['svcs']['password'], 'literal-pw')
+
+    def test_15_username_without_password_fatal(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+username = "syncer"
+''')
+
+    def test_16_registry_excludes_legacy_auth_keys(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+kea_password_env = "SOME_VAR"
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+''')
+
+    def test_17_legacy_username_without_password_fatal(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+kea_username = "syncer"
+''')
+
+    def test_18_empty_password_explicitly_allowed(self):
+        conf = _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+kea_username = "syncer"
+kea_password = ""
+''')
+        self.assertEqual(conf.kea_password, '')
+
     def test_09_registry_excludes_legacy_settings(self):
         with self.assertRaises(SystemExit):
             _get_config(BASE + '''

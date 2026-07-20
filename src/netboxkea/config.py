@@ -133,6 +133,11 @@ def _normalize_kea_servers(raw):
                        'are mutually exclusive')
             spec['password'] = _password_from_env(
                 spec.pop('password_env'), f'kea_servers.{ntag}')
+        if spec.get('username') and 'password' not in spec:
+            # fail fast rather than silently 403 on every command
+            _fatal(f'kea_servers.{ntag}: "username" set without "password" '
+                   'or "password_env" — set password = "" explicitly if an '
+                   'empty password is intended')
         dsn = spec.get('db')
         if dsn:
             if dsn in seen_dsn:
@@ -204,9 +209,13 @@ def get_config():
             'arguments nor in configuration file (if any)')
         sys.exit(1)
     if 'kea_servers' in settings:
-        if 'kea_url' in settings or 'kea_db' in settings:
-            _fatal('"kea_servers" replaces "kea_url"/"kea_db" — remove the '
-                   'single-server settings when using the registry')
+        legacy = [k for k in ('kea_url', 'kea_db', 'kea_username',
+                              'kea_password', 'kea_password_env')
+                  if k in settings]
+        if legacy:
+            _fatal(f'"kea_servers" replaces the single-server settings '
+                   f'{legacy} — registry entries carry their own '
+                   'username/password[_env]')
         settings['kea_servers'] = _normalize_kea_servers(
             settings['kea_servers'])
         if 'default_server_tag' not in settings:
@@ -232,6 +241,12 @@ def get_config():
             if settings.get(base):
                 _fatal(f'"{base}" and "{env_key}" are mutually exclusive')
             settings[base] = _password_from_env(settings[env_key], env_key)
+    for user_key, pw_key in (('kea_username', 'kea_password'),
+                             ('ddns_d2_username', 'ddns_d2_password')):
+        if settings.get(user_key) and pw_key not in settings:
+            _fatal(f'"{user_key}" set without "{pw_key}" or '
+                   f'"{pw_key}_env" — set {pw_key} = "" explicitly if an '
+                   'empty password is intended')
 
     conf = Config(**settings)
 

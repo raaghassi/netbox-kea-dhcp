@@ -35,6 +35,16 @@ def build_kea_backends(conf):
                     password=conf.kea_password), None
 
 
+def build_ddns(conf):
+    """Build the optional kea-dhcp-ddns (D2) zone manager from config."""
+
+    if not conf.ddns_d2_url:
+        return None
+    return DdnsManager(conf.netbox_url, conf.netbox_token, conf.ddns_d2_url,
+                       username=conf.ddns_d2_username,
+                       password=conf.ddns_d2_password)
+
+
 def run():
     conf = get_config()
     init_logger(conf.log_level, conf.ext_log_level, conf.syslog_level_prefix)
@@ -53,13 +63,9 @@ def run():
         kea_target = conf.kea_db if conf.kea_db else conf.kea_url
         logging.info(f'netbox: {conf.netbox_url}, kea: {kea_target}')
     # Optional: manage kea-dhcp-ddns (D2) forward/reverse-ddns zones from netbox-dns.
-    ddns = None
-    if conf.ddns_d2_url:
+    ddns = build_ddns(conf)
+    if ddns:
         logging.info(f'ddns: managing kea-dhcp-ddns at {conf.ddns_d2_url}')
-        ddns = DdnsManager(conf.netbox_url, conf.netbox_token,
-                           conf.ddns_d2_url,
-                           username=conf.ddns_d2_username,
-                           password=conf.ddns_d2_password)
     conn = Connector(
         nb, kea, conf.subnet_prefix_map, conf.pool_iprange_map,
         conf.reservation_ipaddr_map, check=conf.check_only, ddns=ddns,
