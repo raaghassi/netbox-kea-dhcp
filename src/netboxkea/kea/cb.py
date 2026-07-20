@@ -19,6 +19,7 @@ import logging
 from copy import deepcopy
 
 import psycopg  # psycopg 3 (present in the NetBox runtime image)
+from psycopg.types.json import Json
 
 from .app import DHCP4App, SUBNETS, POOLS, RESAS, USR_CTX, PREFIX, IP_RANGE
 
@@ -178,10 +179,15 @@ class DHCP4CB(DHCP4App):
         cur.execute('DELETE FROM dhcp4_pool WHERE subnet_id=%s', (sid,))
         for p in s.get(POOLS, []):
             start, _, end = p['pool'].partition('-')
+            # user_context carries the netbox_ip_range_id provenance that
+            # pull() reads back for reconcile matching; omitting it here
+            # erased it on every push.
+            uctx = p.get(USR_CTX)
             cur.execute(
                 'INSERT INTO dhcp4_pool (start_address, end_address, subnet_id, '
-                'modification_ts) VALUES (%s, %s, %s, now())',
-                (start.strip(), end.strip(), sid))
+                'user_context, modification_ts) VALUES (%s, %s, %s, %s, now())',
+                (start.strip(), end.strip(), sid,
+                 Json(uctx) if uctx else None))
 
         cur.execute(
             'DELETE FROM dhcp4_options WHERE dhcp4_subnet_id=%s AND scope_id=1',
@@ -192,11 +198,16 @@ class DHCP4CB(DHCP4App):
                 logging.warning(
                     "CB: unknown option '{}' skipped".format(od.get('name')))
                 continue
+            # client_classes '[ ]' matches what Kea's own CB writer stores
+            # unconditionally; the schema-v30 upgrade makes the column
+            # NOT NULL, so omitting it breaks on the first db-upgrade
+            # past Kea 3.0.
             cur.execute(
                 'INSERT INTO dhcp4_options (code, formatted_value, space, '
-                'persistent, dhcp4_subnet_id, scope_id, modification_ts, '
-                'cancelled) VALUES (%s, %s, %s, false, %s, 1, now(), false)',
-                (code, od.get('data'), 'dhcp4', sid))
+                'persistent, dhcp4_subnet_id, scope_id, client_classes, '
+                'modification_ts, cancelled) '
+                'VALUES (%s, %s, %s, false, %s, 1, %s, now(), false)',
+                (code, od.get('data'), 'dhcp4', sid, '[ ]'))
 
     # Host reservations belong to the Kea host backend, not the config backend.
     def set_reservation(self, prefix_id, ipaddr_id, resa_item):
