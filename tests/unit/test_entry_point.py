@@ -26,7 +26,7 @@ class TestBuildKeaBackends(unittest.TestCase):
         kea, default_tag = build_kea_backends(conf)
         self.assertEqual(default_tag, 'svcs')
         self.assertEqual(set(kea), {'svcs', 'site-a'})
-        cb.assert_called_once_with('dbname=kea')
+        cb.assert_called_once_with('dbname=kea', api_url='http://svcs:8000/')
         app.assert_called_once_with('http://site-a:8000/')
         self.assertIs(kea['svcs'], cb.return_value)
         self.assertIs(kea['site-a'], app.return_value)
@@ -34,7 +34,7 @@ class TestBuildKeaBackends(unittest.TestCase):
     def test_02_legacy_db_backend(self, cb, app):
         kea, default_tag = build_kea_backends(_conf(kea_db='dbname=kea'))
         self.assertIsNone(default_tag)
-        cb.assert_called_once_with('dbname=kea')
+        cb.assert_called_once_with('dbname=kea', api_url=None)
         app.assert_not_called()
         self.assertIs(kea, cb.return_value)
 
@@ -47,7 +47,9 @@ class TestBuildKeaBackends(unittest.TestCase):
         self.assertIs(kea, app.return_value)
 
     def test_04_legacy_db_wins_over_url(self, cb, app):
+        # both set (the live deployment shape): CB mode, with the control
+        # socket wired in as the host_cmds/lease_cmds API channel
         kea, _ = build_kea_backends(
             _conf(kea_db='dbname=kea', kea_url='http://kea:8000/'))
-        cb.assert_called_once_with('dbname=kea')
+        cb.assert_called_once_with('dbname=kea', api_url='http://kea:8000/')
         app.assert_not_called()

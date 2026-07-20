@@ -28,6 +28,11 @@ kea_url = "http://10.94.135.209:8000/"
 # socket (control-agent mode, for standalone hosts with persistent disks:
 # bootstrap the base config once, e.g. with Ansible, then NetBox owns all
 # changes through this syncer and config-write persists them locally).
+# A CB entry (db) with url ALSO set additionally syncs host reservations
+# through that instance's host_cmds API (hosts database) and evicts stale
+# leases via lease_cmds — the instance must load libdhcp_host_cmds.so and
+# configure a hosts-database on the same DB. Without url, CB mode skips
+# reservations with a warning.
 # Prefixes pick their server via the NetBox custom field named by
 # server_tag_custom_field; without a value they go to default_server_tag;
 # unknown tags are skipped with a warning. Tags are lowercased; "all"/"any"

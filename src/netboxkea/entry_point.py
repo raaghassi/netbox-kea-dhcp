@@ -19,11 +19,12 @@ def build_kea_backends(conf):
 
     if conf.kea_servers:
         kea = {
-            tag: DHCP4CB(spec['db']) if spec.get('db') else DHCP4App(spec['url'])
+            tag: DHCP4CB(spec['db'], api_url=spec.get('url'))
+            if spec.get('db') else DHCP4App(spec['url'])
             for tag, spec in conf.kea_servers.items()}
         return kea, conf.default_server_tag
-    return (DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url),
-            None)
+    return (DHCP4CB(conf.kea_db, api_url=conf.kea_url) if conf.kea_db
+            else DHCP4App(conf.kea_url), None)
 
 
 def run():

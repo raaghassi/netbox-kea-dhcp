@@ -86,6 +86,45 @@ class DHCP4API:
 
         self._request_kea('config-write')
 
+    def add_reservation(self, resa):
+        """Create a host reservation in the hosts database (host_cmds).
+
+        resa is the reservation map (subnet-id, ip-address, hw-address,
+        hostname, user-context, ...). operation-target passed explicitly:
+        the ARM documents 'database' as the write commands' effective
+        default but the JSON specs disagree ('alternate'), so don't rely
+        on it."""
+
+        self._request_kea('reservation-add', {
+            'reservation': resa, 'operation-target': 'database'})
+
+    def del_reservation(self, subnet_id, ip_address):
+        """Delete a host reservation by (subnet-id, ip-address) from the
+        hosts database. Not-found is tolerated: the reconcile caller only
+        cares that the reservation is gone ('Host not deleted (not
+        found).' comes back as result 1, same code as real errors, so the
+        text is the only discriminator the ARM documents)."""
+
+        payload = {'command': 'reservation-del', 'service': ['dhcp4'],
+                   'arguments': {'subnet-id': subnet_id,
+                                 'ip-address': ip_address,
+                                 'operation-target': 'database'}}
+        try:
+            r = self.session.post(self.url, json=payload)
+            r.raise_for_status()
+            rj = r.json()
+        except requests.exceptions.RequestException as e:
+            raise KeaServerError(f'API error: {e}')
+        assert len(rj) == 1
+        rj = rj.pop(0)
+        result, text = rj['result'], rj.get('text')
+        if result == 0:
+            logging.info(f'reservation-del {ip_address}: {text}')
+        elif result == 1 and 'not found' in (text or ''):
+            logging.debug(f'reservation-del {ip_address}: {text}')
+        else:
+            raise KeaCmdError(f'command "reservation-del" returns "{text}"')
+
     def del_lease4(self, ip_address):
         """ Delete an IPv4 lease. Ignores non-existent leases (result 3). """
 
