@@ -69,30 +69,63 @@ class Connector:
     """ Main class that connects Netbox objects to Kea DHCP config items """
 
     def __init__(self, nb, kea, prefix_subnet_map, pool_iprange_map,
-                 reservation_ipaddr_map, check=False, ddns=None):
+                 reservation_ipaddr_map, check=False, ddns=None,
+                 default_tag=None, tag_field='kea_server'):
         self.nb = nb
-        self.kea = kea
+        # kea is either a single backend (legacy single-server mode) or a
+        # {server_tag: backend} registry. With a registry, default_tag names
+        # the tag applied to prefixes that don't carry tag_field; without
+        # one (default_tag None), the custom field is ignored entirely and
+        # everything syncs to the sole backend, as before.
+        self.backends = kea if isinstance(kea, dict) else {None: kea}
+        self.default_tag = default_tag
         self.subnet_prefix_map = prefix_subnet_map
         self.pool_iprange_map = pool_iprange_map
         self.reservation_ipaddr_map = reservation_ipaddr_map
         self.check = check
         self.ddns = ddns
+        self.tag_field = tag_field
+
+    def _backend_for_prefix(self, pref):
+        """Resolve the backend serving this prefix. None means skip it."""
+
+        if self.default_tag is None:
+            return next(iter(self.backends.values()))
+        cf = getattr(pref, 'custom_fields', None) or {}
+        tag = str(cf.get(self.tag_field) or self.default_tag).strip().lower()
+        kea = self.backends.get(tag)
+        if kea is None:
+            logging.warning(
+                f'prefix {pref}: unknown {self.tag_field} tag "{tag}", '
+                'skipping (not a kea_servers entry)')
+        return kea
+
+    def _broadcast(self, method, *args):
+        """Apply a deletion to every backend. Deletions are idempotent and
+        the deleted NetBox object is gone, so there is no tag to route by."""
+
+        for kea in self.backends.values():
+            getattr(kea, method)(*args)
 
     def sync_all(self):
         """ Replace current DHCP configuration by a new generated one """
 
-        self.kea.pull()
-        self.kea.del_all_subnets()
+        for kea in self.backends.values():
+            kea.pull()
+            kea.del_all_subnets()
 
         # Create DHCP configuration for each prefix
         all_failed = None
         for p in self.nb.all_prefixes():
+            kea = self._backend_for_prefix(p)
+            if kea is None:
+                continue
             if all_failed is None:
                 all_failed = True
             pl = f'prefix {p}: '
             logging.debug(f'{pl}generate DHCP config')
             # Speed up things by disabling auto-commit
-            self.kea.auto_commit = False
+            kea.auto_commit = False
             try:
                 self._prefix_to_subnet(p, fullsync=True)
             except KeaError as e:
@@ -103,12 +136,12 @@ class Connector:
             # false errors of missing, not yet created, subnets.
             if not self.check:
                 try:
-                    self.kea.commit()
+                    kea.commit()
                 except KeaError as e:
                     logging.error(f'{pl}commit failed. Error: {e}')
                     # Retry with auto-commit enabled to catch the faulty item
                     logging.warning(f'{pl}retry with auto commit on')
-                    self.kea.auto_commit = True
+                    kea.auto_commit = True
                     try:
                         self._prefix_to_subnet(p, fullsync=True)
                     except KeaError as e:
@@ -117,7 +150,8 @@ class Connector:
 
             all_failed = False
 
-        self.kea.auto_commit = True
+        for kea in self.backends.values():
+            kea.auto_commit = True
         if all_failed is not True:
             self.push_to_dhcp()
 
@@ -125,22 +159,24 @@ class Connector:
         if self.check:
             logging.info('check mode on: config will NOT be pushed to server')
         else:
-            self.kea.push()
+            for kea in self.backends.values():
+                kea.push()
 
     def reload_dhcp_config(self):
-        self.kea.pull()
+        for kea in self.backends.values():
+            kea.pull()
 
     def sync_prefix(self, id_):
         p = self.nb.prefix(id_)
-        self._prefix_to_subnet(p) if p else self.kea.del_subnet(id_)
+        self._prefix_to_subnet(p) if p else self._broadcast('del_subnet', id_)
 
     def sync_iprange(self, id_):
         r = self.nb.ip_range(id_)
-        self._iprange_to_pool(r) if r else self.kea.del_pool(id_)
+        self._iprange_to_pool(r) if r else self._broadcast('del_pool', id_)
 
     def sync_ipaddress(self, id_):
         i = self.nb.ip_address(id_)
-        self._ipaddr_to_resa(i) if i else self.kea.del_resa(id_)
+        self._ipaddr_to_resa(i) if i else self._broadcast('del_resa', id_)
 
     def sync_lease(self, lease):
         """Reflect a Kea lease event into NetBox as a status=dhcp host IP
@@ -183,17 +219,20 @@ class Connector:
             self.sync_ipaddress(i.id)
 
     def _prefix_to_subnet(self, pref, fullsync=False):
+        kea = self._backend_for_prefix(pref)
+        if kea is None:
+            return
         subnet = _mk_dhcp_item(pref, self.subnet_prefix_map)
         subnet['subnet'] = pref.prefix
         if not fullsync:
             try:
-                self.kea.update_subnet(pref.id, subnet)
+                kea.update_subnet(pref.id, subnet)
             except (SubnetNotEqual, SubnetNotFound):
                 # Subnet address has changed or subnet is missing, recreate it
                 fullsync = True
 
         if fullsync:
-            self.kea.set_subnet(pref.id, subnet)
+            kea.set_subnet(pref.id, subnet)
             # Add host reservations
             for i in self.nb.ip_addresses(parent=pref.prefix):
                 try:
@@ -215,8 +254,11 @@ class Connector:
         end = str(ip_interface(iprange.end_address).ip)
         pool['pool'] = f'{start}-{end}'
         for pref in prefixes:
+            kea = self._backend_for_prefix(pref)
+            if kea is None:
+                continue
             try:
-                self.kea.set_pool(pref.id, iprange.id, pool)
+                kea.set_pool(pref.id, iprange.id, pool)
             except SubnetNotFound:
                 if not prefix:
                     logging.warning(
@@ -230,13 +272,16 @@ class Connector:
             contains=ip.address)
         resa = _mk_dhcp_item(ip, self.reservation_ipaddr_map)
         if not resa.get('hw-address'):
-            self.kea.del_resa(ip.id)
+            self._broadcast('del_resa', ip.id)
             return
 
         resa['ip-address'] = str(ip_interface(ip.address).ip)
         for pref in prefixes:
+            kea = self._backend_for_prefix(pref)
+            if kea is None:
+                continue
             try:
-                self.kea.set_reservation(pref.id, ip.id, resa)
+                kea.set_reservation(pref.id, ip.id, resa)
             except SubnetNotFound:
                 if not prefix:
                     logging.warning(

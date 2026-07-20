@@ -15,14 +15,26 @@ def run():
     init_logger(conf.log_level, conf.ext_log_level, conf.syslog_level_prefix)
 
     # Instanciate source, sink and connector
-    kea_target = conf.kea_db if conf.kea_db else conf.kea_url
-    logging.info(f'netbox: {conf.netbox_url}, kea: {kea_target}')
     nb = NetboxApp(
         conf.netbox_url, conf.netbox_token, prefix_filter=conf.prefix_filter,
         iprange_filter=conf.iprange_filter,
         ipaddress_filter=conf.ipaddress_filter)
-    # config backend (direct DB) when kea_db is set, else control agent (config-set)
-    kea = DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url)
+    # tag -> backend registry: config backend (direct DB) when 'db' is set,
+    # else control agent via the instance's HTTP control socket. Legacy
+    # single-server settings build a one-entry registry with no tag routing.
+    if conf.kea_servers:
+        kea = {
+            tag: DHCP4CB(spec['db']) if spec.get('db') else DHCP4App(spec['url'])
+            for tag, spec in conf.kea_servers.items()}
+        default_tag = conf.default_server_tag
+        logging.info(
+            f'netbox: {conf.netbox_url}, kea servers: {", ".join(kea)} '
+            f'(default tag: {default_tag})')
+    else:
+        kea_target = conf.kea_db if conf.kea_db else conf.kea_url
+        logging.info(f'netbox: {conf.netbox_url}, kea: {kea_target}')
+        kea = DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url)
+        default_tag = None
     # Optional: manage kea-dhcp-ddns (D2) forward/reverse-ddns zones from netbox-dns.
     ddns = None
     if conf.ddns_d2_url:
@@ -30,7 +42,8 @@ def run():
         ddns = DdnsManager(conf.netbox_url, conf.netbox_token, conf.ddns_d2_url)
     conn = Connector(
         nb, kea, conf.subnet_prefix_map, conf.pool_iprange_map,
-        conf.reservation_ipaddr_map, check=conf.check_only, ddns=ddns)
+        conf.reservation_ipaddr_map, check=conf.check_only, ddns=ddns,
+        default_tag=default_tag, tag_field=conf.server_tag_custom_field)
 
     if not conf.full_sync_at_startup and not conf.listen:
         logging.warning('Neither full sync nor listen mode has been asked')

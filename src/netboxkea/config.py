@@ -31,6 +31,15 @@ class Config:
     # forward/reverse-ddns domains from netbox-dns zones (ddns_enabled) and
     # config-sets them. Unset = no DDNS-zone management.
     ddns_d2_url: str = None
+    # Multi-server registry: maps a Kea server tag to the backend that serves
+    # it. Each entry is a table with 'db' (libpq DSN -> config-backend mode)
+    # and/or 'url' (HTTP control socket -> control-agent mode). Mutually
+    # exclusive with kea_url/kea_db; requires default_server_tag.
+    kea_servers: dict = field(default_factory=dict)
+    # Tag applied to prefixes that don't carry the custom field below.
+    default_server_tag: str = None
+    # NetBox custom field on prefixes naming the serving Kea tag.
+    server_tag_custom_field: str = 'kea_server'
     netbox_url: str = None
     netbox_token: str = None
     prefix_filter: dict = field(default_factory=lambda: {
@@ -55,6 +64,54 @@ class Config:
         'hostname': ['dns_name', 'assigned_object.device.name',
                      'assigned_object.virtual_machine.name']
         })
+
+
+# Reserved words in Kea's server-tag model (remote-server4-set refuses them;
+# tag comparison is case-insensitive and createAuditRevisionDHCP4 takes
+# VARCHAR(64), hence the normalization and length cap below).
+_RESERVED_TAGS = ('all', 'any')
+
+
+def _fatal(msg):
+    logging.fatal(msg)
+    sys.exit(1)
+
+
+def _normalize_kea_servers(raw):
+    """Validate and normalize the kea_servers table. Exits on bad config."""
+
+    if not isinstance(raw, dict) or not raw:
+        _fatal('Setting "kea_servers" must be a non-empty table of '
+               'tag -> {db = "...", url = "..."} entries')
+    servers = {}
+    seen_dsn = {}
+    for tag, spec in raw.items():
+        ntag = str(tag).strip().lower()
+        if ntag != tag:
+            logging.warning(f'kea_servers: tag "{tag}" normalized to "{ntag}"')
+        if not ntag or len(ntag) > 64:
+            _fatal(f'kea_servers: tag "{tag}" must be 1-64 characters')
+        if ntag in _RESERVED_TAGS:
+            _fatal(f'kea_servers: tag "{ntag}" is reserved in Kea')
+        if ntag in servers:
+            _fatal(f'kea_servers: duplicate tag "{ntag}" after normalization')
+        if not isinstance(spec, dict):
+            _fatal(f'kea_servers.{ntag}: entry must be a table')
+        unknown = set(spec) - {'db', 'url'}
+        if unknown:
+            _fatal(f'kea_servers.{ntag}: unknown keys {sorted(unknown)}')
+        if not spec.get('db') and not spec.get('url'):
+            _fatal(f'kea_servers.{ntag}: needs "db" (config backend DSN) '
+                   'and/or "url" (HTTP control socket)')
+        dsn = spec.get('db')
+        if dsn:
+            if dsn in seen_dsn:
+                _fatal(f'kea_servers: tags "{seen_dsn[dsn]}" and "{ntag}" '
+                       'share one config-backend DSN — unsupported until '
+                       'the CB writer scopes writes per server tag')
+            seen_dsn[dsn] = ntag
+        servers[ntag] = dict(spec)
+    return servers
 
 
 def get_config():
@@ -116,10 +173,25 @@ def get_config():
             'Setting "netbox_url" not found, neither on command line '
             'arguments nor in configuration file (if any)')
         sys.exit(1)
-    if 'kea_url' not in settings and 'kea_db' not in settings:
+    if 'kea_servers' in settings:
+        if 'kea_url' in settings or 'kea_db' in settings:
+            _fatal('"kea_servers" replaces "kea_url"/"kea_db" — remove the '
+                   'single-server settings when using the registry')
+        settings['kea_servers'] = _normalize_kea_servers(
+            settings['kea_servers'])
+        if 'default_server_tag' not in settings:
+            _fatal('"default_server_tag" is required with "kea_servers" (tag '
+                   'applied to prefixes without the custom field)')
+        settings['default_server_tag'] = str(
+            settings['default_server_tag']).strip().lower()
+        if settings['default_server_tag'] not in settings['kea_servers']:
+            _fatal(f'default_server_tag "{settings["default_server_tag"]}" '
+                   'is not a kea_servers tag')
+    elif 'kea_url' not in settings and 'kea_db' not in settings:
         logging.fatal(
-            'Either "kea_url" (control agent) or "kea_db" (config backend DSN) '
-            'must be set, on command line arguments or in the config file')
+            'Either "kea_url" (control agent), "kea_db" (config backend DSN) '
+            'or a "kea_servers" registry must be set, on command line '
+            'arguments or in the config file')
         sys.exit(1)
 
     conf = Config(**settings)
