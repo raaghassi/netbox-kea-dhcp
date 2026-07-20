@@ -21,6 +21,31 @@ netbox_token = "9123456789abcdef0123456789abcdef01234568"
 # Kea control agent URI
 kea_url = "http://10.94.135.209:8000/"
 
+# Multi-server registry (replaces kea_url/kea_db — set one or the other).
+# Routes prefixes to several Kea servers. Each entry maps a server tag to a
+# backend: db = libpq DSN of that server's PostgreSQL config backend
+# (config-backend mode, for in-cluster/ephemeral Keas); url = HTTP control
+# socket (control-agent mode, for standalone hosts with persistent disks:
+# bootstrap the base config once, e.g. with Ansible, then NetBox owns all
+# changes through this syncer and config-write persists them locally).
+# Prefixes pick their server via the NetBox custom field named by
+# server_tag_custom_field; without a value they go to default_server_tag;
+# unknown tags are skipped with a warning. Tags are lowercased; "all"/"any"
+# are reserved by Kea; 64 chars max. Two tags cannot share one config-backend
+# DSN (unsupported until CB writes are tag-scoped).
+# NOTE: keep the top-level keys BEFORE the [kea_servers.*] tables, or TOML
+# assigns them to the last table.
+#
+#default_server_tag = "svcs"
+#server_tag_custom_field = "kea_server"
+#
+#[kea_servers.svcs]
+#db = "host=kea-leases-rw.kea.svc dbname=kea user=kea-leases sslmode=require"
+#url = "http://kea-control.kea.svc:8000/"
+#
+#[kea_servers.site-a]
+#url = "http://kea.site-a.lan:8000/"
+
 #log_level = "debug"          # or "info", "warning" (default), "error"
 #ext_log_level = "warning"    # Log level for external modules
 
