@@ -19,12 +19,20 @@ def build_kea_backends(conf):
 
     if conf.kea_servers:
         kea = {
-            tag: DHCP4CB(spec['db'], api_url=spec.get('url'))
-            if spec.get('db') else DHCP4App(spec['url'])
+            tag: DHCP4CB(spec['db'], api_url=spec.get('url'),
+                         api_username=spec.get('username'),
+                         api_password=spec.get('password'))
+            if spec.get('db')
+            else DHCP4App(spec['url'], username=spec.get('username'),
+                          password=spec.get('password'))
             for tag, spec in conf.kea_servers.items()}
         return kea, conf.default_server_tag
-    return (DHCP4CB(conf.kea_db, api_url=conf.kea_url) if conf.kea_db
-            else DHCP4App(conf.kea_url), None)
+    if conf.kea_db:
+        return DHCP4CB(conf.kea_db, api_url=conf.kea_url,
+                       api_username=conf.kea_username,
+                       api_password=conf.kea_password), None
+    return DHCP4App(conf.kea_url, username=conf.kea_username,
+                    password=conf.kea_password), None
 
 
 def run():
@@ -48,7 +56,10 @@ def run():
     ddns = None
     if conf.ddns_d2_url:
         logging.info(f'ddns: managing kea-dhcp-ddns at {conf.ddns_d2_url}')
-        ddns = DdnsManager(conf.netbox_url, conf.netbox_token, conf.ddns_d2_url)
+        ddns = DdnsManager(conf.netbox_url, conf.netbox_token,
+                           conf.ddns_d2_url,
+                           username=conf.ddns_d2_username,
+                           password=conf.ddns_d2_password)
     conn = Connector(
         nb, kea, conf.subnet_prefix_map, conf.pool_iprange_map,
         conf.reservation_ipaddr_map, check=conf.check_only, ddns=ddns,

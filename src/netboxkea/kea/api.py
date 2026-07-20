@@ -40,9 +40,14 @@ class FileAPI:
 
 
 class DHCP4API:
-    def __init__(self, url):
+    def __init__(self, url, username=None, password=None):
         self.url = url
         self.session = requests.Session()
+        if username:
+            # session-level HTTP basic auth (requests: s.auth = tuple);
+            # Kea rejects unauthenticated commands with result 403 when
+            # the control socket has an authentication clause.
+            self.session.auth = (username, password or '')
 
     def _request_kea(self, command, arguments={}):
         """ Send command to Kea APP """

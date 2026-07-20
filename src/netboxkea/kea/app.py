@@ -44,9 +44,9 @@ def _boundaries(ip_range):
 
 class DHCP4App:
 
-    def __init__(self, url=None):
+    def __init__(self, url=None, username=None, password=None):
         if url.startswith('http://') or url.startswith('https://'):
-            self.api = DHCP4API(url)
+            self.api = DHCP4API(url, username=username, password=password)
         elif url.startswith('file://'):
             self.api = FileAPI(url.removeprefix('file://'))
         else:

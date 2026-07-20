@@ -299,3 +299,12 @@ class TestDHCP4APIReservationCommands(unittest.TestCase):
     def test_04_del_reservation_ok(self):
         self._respond(0, 'Host deleted.')
         self.api.del_reservation(100, '10.0.0.5')
+
+    def test_05_basic_auth_set_on_session(self):
+        api = DHCP4API('http://kea:8000/', username='syncer',
+                       password='s3cret')
+        self.assertEqual(api.session.auth, ('syncer', 's3cret'))
+
+    def test_06_no_auth_by_default(self):
+        api = DHCP4API('http://kea:8000/')
+        self.assertIsNone(api.session.auth)

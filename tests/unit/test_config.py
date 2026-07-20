@@ -115,6 +115,50 @@ default_server_tag = "ctrl"
 url = "http://kea:8000/"
 ''')
 
+    def test_10_password_env_resolves(self):
+        with patch.dict(os.environ, {'KEA_CTRL_PW': 's3cret'}):
+            conf = _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+username = "syncer"
+password_env = "KEA_CTRL_PW"
+''')
+        self.assertEqual(conf.kea_servers['svcs']['password'], 's3cret')
+        self.assertNotIn('password_env', conf.kea_servers['svcs'])
+
+    def test_11_password_env_missing_fatal(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('KEA_CTRL_PW_MISSING', None)
+            with self.assertRaises(SystemExit):
+                _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+password_env = "KEA_CTRL_PW_MISSING"
+''')
+
+    def test_12_password_and_env_mutually_exclusive(self):
+        with patch.dict(os.environ, {'KEA_CTRL_PW': 's3cret'}):
+            with self.assertRaises(SystemExit):
+                _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+password = "literal"
+password_env = "KEA_CTRL_PW"
+''')
+
+    def test_13_legacy_password_env_resolves(self):
+        with patch.dict(os.environ, {'KEA_CTRL_PW': 's3cret'}):
+            conf = _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+kea_username = "syncer"
+kea_password_env = "KEA_CTRL_PW"
+''')
+        self.assertEqual(conf.kea_password, 's3cret')
+        self.assertEqual(conf.kea_username, 'syncer')
+
     def test_09_registry_excludes_legacy_settings(self):
         with self.assertRaises(SystemExit):
             _get_config(BASE + '''

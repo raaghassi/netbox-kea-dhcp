@@ -66,7 +66,8 @@ HW_ADDRESS_TYPE = 0
 
 class DHCP4CB(DHCP4App):
 
-    def __init__(self, dsn, api_url=None):
+    def __init__(self, dsn, api_url=None, api_username=None,
+                 api_password=None):
         # libpq DSN, e.g. "host=kea-leases-rw.kea.svc dbname=kea user=kea-leases".
         # Password/TLS come from PGPASSWORD / PGSSLMODE / PGSSLROOTCERT env.
         # api_url: the instance's HTTP control socket. When set, host
@@ -74,7 +75,9 @@ class DHCP4CB(DHCP4App):
         # database) and stale leases are evicted via lease_cmds; without
         # it, reservation sync stays a logged no-op as before.
         self.dsn = dsn
-        self.api = DHCP4API(api_url) if api_url else None
+        self.api = DHCP4API(
+            api_url, username=api_username,
+            password=api_password) if api_url else None
         # Lease evictions recorded by the in-memory reservation logic;
         # flushed by push() so check-only runs never mutate the live server.
         self._pending_lease_dels = set()

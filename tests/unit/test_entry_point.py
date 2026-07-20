@@ -6,7 +6,8 @@ from netboxkea.entry_point import build_kea_backends
 
 def _conf(**kw):
     defaults = {'kea_servers': {}, 'kea_url': None, 'kea_db': None,
-                'default_server_tag': None}
+                'default_server_tag': None, 'kea_username': None,
+                'kea_password': None}
     defaults.update(kw)
     conf = Mock()
     for k, v in defaults.items():
@@ -26,15 +27,19 @@ class TestBuildKeaBackends(unittest.TestCase):
         kea, default_tag = build_kea_backends(conf)
         self.assertEqual(default_tag, 'svcs')
         self.assertEqual(set(kea), {'svcs', 'site-a'})
-        cb.assert_called_once_with('dbname=kea', api_url='http://svcs:8000/')
-        app.assert_called_once_with('http://site-a:8000/')
+        cb.assert_called_once_with(
+            'dbname=kea', api_url='http://svcs:8000/', api_username=None,
+            api_password=None)
+        app.assert_called_once_with(
+            'http://site-a:8000/', username=None, password=None)
         self.assertIs(kea['svcs'], cb.return_value)
         self.assertIs(kea['site-a'], app.return_value)
 
     def test_02_legacy_db_backend(self, cb, app):
         kea, default_tag = build_kea_backends(_conf(kea_db='dbname=kea'))
         self.assertIsNone(default_tag)
-        cb.assert_called_once_with('dbname=kea', api_url=None)
+        cb.assert_called_once_with(
+            'dbname=kea', api_url=None, api_username=None, api_password=None)
         app.assert_not_called()
         self.assertIs(kea, cb.return_value)
 
@@ -42,7 +47,8 @@ class TestBuildKeaBackends(unittest.TestCase):
         kea, default_tag = build_kea_backends(
             _conf(kea_url='http://kea:8000/'))
         self.assertIsNone(default_tag)
-        app.assert_called_once_with('http://kea:8000/')
+        app.assert_called_once_with(
+            'http://kea:8000/', username=None, password=None)
         cb.assert_not_called()
         self.assertIs(kea, app.return_value)
 
@@ -51,5 +57,29 @@ class TestBuildKeaBackends(unittest.TestCase):
         # socket wired in as the host_cmds/lease_cmds API channel
         kea, _ = build_kea_backends(
             _conf(kea_db='dbname=kea', kea_url='http://kea:8000/'))
-        cb.assert_called_once_with('dbname=kea', api_url='http://kea:8000/')
+        cb.assert_called_once_with(
+            'dbname=kea', api_url='http://kea:8000/', api_username=None,
+            api_password=None)
         app.assert_not_called()
+
+    def test_05_registry_credentials_passed_through(self, cb, app):
+        conf = _conf(kea_servers={
+            'svcs': {'db': 'dbname=kea', 'url': 'http://svcs:8000/',
+                     'username': 'syncer', 'password': 's3cret'},
+            'site-a': {'url': 'http://site-a:8000/', 'username': 'syncer',
+                       'password': 'other'}},
+            default_server_tag='svcs')
+        build_kea_backends(conf)
+        cb.assert_called_once_with(
+            'dbname=kea', api_url='http://svcs:8000/',
+            api_username='syncer', api_password='s3cret')
+        app.assert_called_once_with(
+            'http://site-a:8000/', username='syncer', password='other')
+
+    def test_06_legacy_credentials_passed_through(self, cb, app):
+        build_kea_backends(_conf(
+            kea_db='dbname=kea', kea_url='http://kea:8000/',
+            kea_username='syncer', kea_password='s3cret'))
+        cb.assert_called_once_with(
+            'dbname=kea', api_url='http://kea:8000/',
+            api_username='syncer', api_password='s3cret')

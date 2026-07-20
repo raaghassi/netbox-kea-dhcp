@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
@@ -27,6 +28,16 @@ class Config:
     # libpq DSN for the Kea config backend (alternative to kea_url's control
     # agent). When set, subnets are written directly to Kea's PostgreSQL CB.
     kea_db: str = None
+    # HTTP basic auth toward the kea control socket (legacy single-server
+    # settings; registry entries carry their own username/password[_env]).
+    # *_password_env names an environment variable holding the password —
+    # keeps secrets out of the config file; resolved at startup.
+    kea_username: str = None
+    kea_password: str = None
+    kea_password_env: str = None
+    ddns_d2_username: str = None
+    ddns_d2_password: str = None
+    ddns_d2_password_env: str = None
     # HTTP control URL of kea-dhcp-ddns (D2). When set, the syncer derives D2's
     # forward/reverse-ddns domains from netbox-dns zones (ddns_enabled) and
     # config-sets them. Unset = no DDNS-zone management.
@@ -77,6 +88,17 @@ def _fatal(msg):
     sys.exit(1)
 
 
+def _password_from_env(env_name, ctx):
+    """Resolve a *_password_env setting. Fatal when the variable is unset:
+    silently running unauthenticated is worse than failing to start."""
+
+    value = os.environ.get(env_name)
+    if not value:
+        _fatal(f'{ctx}: environment variable "{env_name}" (named by '
+               'password_env) is unset or empty')
+    return value
+
+
 def _normalize_kea_servers(raw):
     """Validate and normalize the kea_servers table. Exits on bad config."""
 
@@ -97,12 +119,20 @@ def _normalize_kea_servers(raw):
             _fatal(f'kea_servers: duplicate tag "{ntag}" after normalization')
         if not isinstance(spec, dict):
             _fatal(f'kea_servers.{ntag}: entry must be a table')
-        unknown = set(spec) - {'db', 'url'}
+        unknown = set(spec) - {'db', 'url', 'username', 'password',
+                               'password_env'}
         if unknown:
             _fatal(f'kea_servers.{ntag}: unknown keys {sorted(unknown)}')
         if not spec.get('db') and not spec.get('url'):
             _fatal(f'kea_servers.{ntag}: needs "db" (config backend DSN) '
                    'and/or "url" (HTTP control socket)')
+        spec = dict(spec)
+        if spec.get('password_env'):
+            if spec.get('password'):
+                _fatal(f'kea_servers.{ntag}: "password" and "password_env" '
+                       'are mutually exclusive')
+            spec['password'] = _password_from_env(
+                spec.pop('password_env'), f'kea_servers.{ntag}')
         dsn = spec.get('db')
         if dsn:
             if dsn in seen_dsn:
@@ -110,7 +140,7 @@ def _normalize_kea_servers(raw):
                        'share one config-backend DSN — by design each Kea '
                        'instance owns its own config-backend database')
             seen_dsn[dsn] = ntag
-        servers[ntag] = dict(spec)
+        servers[ntag] = spec
     return servers
 
 
@@ -193,6 +223,15 @@ def get_config():
             'or a "kea_servers" registry must be set, on command line '
             'arguments or in the config file')
         sys.exit(1)
+
+    # Resolve legacy/D2 password_env settings the same way as registry
+    # entries: env var wins the file out of the config, fatal when missing.
+    for base in ('kea_password', 'ddns_d2_password'):
+        env_key = f'{base}_env'
+        if settings.get(env_key):
+            if settings.get(base):
+                _fatal(f'"{base}" and "{env_key}" are mutually exclusive')
+            settings[base] = _password_from_env(settings[env_key], env_key)
 
     conf = Config(**settings)
 

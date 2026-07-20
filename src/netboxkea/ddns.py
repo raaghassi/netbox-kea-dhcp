@@ -20,7 +20,8 @@ REVERSE_SUFFIXES = ('in-addr.arpa', 'ip6.arpa')
 
 class DdnsManager:
 
-    def __init__(self, netbox_url, netbox_token, d2_url, timeout=15):
+    def __init__(self, netbox_url, netbox_token, d2_url, timeout=15,
+                 username=None, password=None):
         self.zones_url = (
             netbox_url.rstrip('/') + '/api/plugins/netbox-dns/zones/')
         self.headers = {
@@ -28,6 +29,8 @@ class DdnsManager:
             'Accept': 'application/json'}
         self.d2_url = d2_url
         self.timeout = timeout
+        # HTTP basic auth toward D2's control socket (None = no auth)
+        self.auth = (username, password or '') if username else None
 
     def _zone_names(self):
         """Active netbox-dns zones flagged ddns_enabled (handles pagination)."""
@@ -47,7 +50,8 @@ class DdnsManager:
         body = {'command': command}
         if arguments is not None:
             body['arguments'] = arguments
-        r = requests.post(self.d2_url, json=body, timeout=self.timeout)
+        r = requests.post(self.d2_url, json=body, timeout=self.timeout,
+                          auth=self.auth)
         r.raise_for_status()
         res = r.json()
         if isinstance(res, list):
