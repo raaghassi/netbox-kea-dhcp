@@ -75,6 +75,9 @@ class DHCP4CB(DHCP4App):
         # it, reservation sync stays a logged no-op as before.
         self.dsn = dsn
         self.api = DHCP4API(api_url) if api_url else None
+        # Lease evictions recorded by the in-memory reservation logic;
+        # flushed by push() so check-only runs never mutate the live server.
+        self._pending_lease_dels = set()
         self.conf = None
         self.commit_conf = None
         self._has_commit = False
@@ -143,8 +146,10 @@ class DHCP4CB(DHCP4App):
         self.conf = {SUBNETS: list(subnets.values())}
         self.commit_conf = deepcopy(self.conf)
         # A pull resynchronizes from the DB: any staged-but-unpushed commit
-        # is now stale, so discard it (pull acts as rollback).
+        # is now stale, so discard it (pull acts as rollback) — including
+        # lease evictions staged by the discarded reservation changes.
         self._has_commit = False
+        self._pending_lease_dels.clear()
 
     @staticmethod
     def _fetch_reservations(cur):
@@ -178,12 +183,24 @@ class DHCP4CB(DHCP4App):
             resa[USR_CTX] = ctx
             yield sid, resa
 
+    def _evict_lease(self, ip):
+        # Defer to push(): the connector only pushes outside check mode,
+        # so staging a reservation change must not touch the live server.
+        logging.debug(f'staging lease eviction for {ip} until push')
+        self._pending_lease_dels.add(ip)
+
     def set_reservation(self, prefix_id, ipaddr_id, resa_item):
         if self.api is None:
             logging.warning(
                 'CB backend: no control URL configured, reservation for IP '
                 'id {} skipped'.format(ipaddr_id))
             return
+        if resa_item.get('hw-address'):
+            # Normalize: the hosts-table read-back is lowercase hex, so a
+            # differently-cased NetBox MAC would otherwise churn del+add on
+            # every push and false-trigger the MAC-change lease eviction.
+            resa_item = {**resa_item,
+                         'hw-address': resa_item['hw-address'].strip().lower()}
         # Inherited in-memory logic: duplicate checks + stale-lease
         # eviction via lease_cmds; push() applies via host_cmds.
         super().set_reservation(prefix_id, ipaddr_id, resa_item)
@@ -233,6 +250,14 @@ class DHCP4CB(DHCP4App):
         self._has_commit = None
         if self.api:
             self._reconcile_reservations(desired)
+            # Flush lease evictions staged by MAC changes / deletions —
+            # the only point live lease mutations are allowed to happen.
+            for ip in sorted(self._pending_lease_dels):
+                try:
+                    self.api.del_lease4(ip)
+                except KeaError as e:
+                    logging.error(f'lease4-del {ip} failed: {e}')
+            self._pending_lease_dels.clear()
 
     def _reconcile_reservations(self, desired):
         """Diff desired in-memory reservations against the hosts table and
@@ -266,13 +291,29 @@ class DHCP4CB(DHCP4App):
                     desired_map[(s[PREFIX], nid)] = r
 
         def _differs(have, want):
+            if (have.get('hw-address') or '').lower() != \
+                    (want.get('hw-address') or '').lower():
+                return True
             return any(have.get(k) != want.get(k)
-                       for k in ('ip-address', 'hw-address', 'hostname'))
+                       for k in ('ip-address', 'hostname'))
+
+        # netbox ids whose desired target address is held by a foreign row:
+        # their adds will be skipped, so their old rows must be kept too —
+        # deleting first would permanently drop a working reservation.
+        blocked_nids = {
+            nid for (sid, nid), r in desired_map.items()
+            if (sid, r.get('ip-address')) in foreign_ips}
 
         # Drop rows that are gone or changed (del-then-add on change)
         for (sid, nid), have in current.items():
             want = desired_map.get((sid, nid))
             if want is not None and not _differs(have, want):
+                continue
+            if nid in blocked_nids:
+                logging.warning(
+                    f'reservation netbox id {nid}: keeping old row '
+                    f'{have.get("ip-address")} — desired target is held by '
+                    'a foreign hosts row')
                 continue
             ip = have.get('ip-address')
             if ip:

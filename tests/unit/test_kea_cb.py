@@ -144,6 +144,121 @@ class TestDHCP4CBReservations(unittest.TestCase):
         self.kea.api.add_reservation.assert_not_called()
 
 
+class TestDHCP4CBStagedMutations(unittest.TestCase):
+    """Check-mode safety: staging reservation changes must not touch the
+    live server; evictions and API writes happen only at push()."""
+
+    def setUp(self):
+        self.kea = DHCP4CB('dbname=kea', api_url='http://kea:8000/')
+        self.kea.api = Mock()
+        self.kea.ip_uniqueness = True
+        self.kea.auto_commit = False
+
+    def _conf_with_resa(self, mac='aa:bb:cc:44:55:66'):
+        self.kea.conf = {'subnet4': [{
+            'id': 100, 'subnet': '10.0.0.0/24', 'pools': [],
+            'reservations': [{
+                'ip-address': '10.0.0.5', 'hw-address': mac,
+                'user-context': {'netbox_ip_address_id': 200}}]}]}
+
+    def test_01_mac_change_eviction_deferred(self):
+        self._conf_with_resa()
+        self.kea.set_reservation(100, 200, {
+            'ip-address': '10.0.0.5', 'hw-address': '11:22:33:44:55:66',
+            'hostname': 'pc.lan'})
+        self.kea.api.del_lease4.assert_not_called()
+        self.assertEqual(self.kea._pending_lease_dels, {'10.0.0.5'})
+
+    def test_02_uppercase_mac_is_normalized_not_evicted(self):
+        self._conf_with_resa()
+        self.kea.set_reservation(100, 200, {
+            'ip-address': '10.0.0.5', 'hw-address': 'AA:BB:CC:44:55:66',
+            'hostname': 'pc.lan'})
+        # same MAC, different case: no eviction, stored lowercase
+        self.assertEqual(self.kea._pending_lease_dels, set())
+        resa = self.kea.conf['subnet4'][0]['reservations'][0]
+        self.assertEqual(resa['hw-address'], 'aa:bb:cc:44:55:66')
+
+    def test_03_pull_discards_staged_evictions(self):
+        self.kea._pending_lease_dels.add('10.0.0.5')
+        cursor = _FakeCursor([
+            [(100, '10.0.0.0/24', None, None, None, None, None, None,
+              None)], [], [], []])
+        self.kea._connect = lambda: _FakeConn(cursor)
+        self.kea.pull()
+        self.assertEqual(self.kea._pending_lease_dels, set())
+
+    def test_04_push_reconciles_and_flushes_evictions(self):
+        # execute order in push(): audit revision, server-id fetchone,
+        # subnet_id fetchall, subnet upsert x4 statements, hosts SELECT
+        cursor = _FakeCursor([[], [(1,)], [], [], [], [], [], [], []])
+        self.kea._connect = lambda: _FakeConn(cursor)
+        self.kea.commit_conf = {'subnet4': [{
+            'id': 100, 'subnet': '10.0.0.0/24', 'pools': [],
+            'reservations': [{
+                'ip-address': '10.0.0.5', 'hw-address': '11:22:33:44:55:66',
+                'hostname': 'pc.lan',
+                'user-context': {'netbox_ip_address_id': 200}}]}]}
+        self.kea._has_commit = True
+        self.kea._pending_lease_dels.add('10.0.0.4')
+        self.kea.push()
+        self.kea.api.add_reservation.assert_called_once()
+        self.kea.api.del_lease4.assert_called_once_with('10.0.0.4')
+        self.assertEqual(self.kea._pending_lease_dels, set())
+
+    def test_05_push_without_api_skips_reconcile(self):
+        kea = DHCP4CB('dbname=kea')
+        cursor = _FakeCursor([[], [(1,)], [], [], [], [], [], []])
+        kea._connect = lambda: _FakeConn(cursor)
+        kea.commit_conf = {'subnet4': [{
+            'id': 100, 'subnet': '10.0.0.0/24', 'pools': []}]}
+        kea._has_commit = True
+        kea.push()
+        # subnet SQL only: no hosts SELECT after the 8 push statements
+        self.assertEqual(len(cursor.executed), 8)
+
+
+class TestDHCP4CBForeignBlocking(unittest.TestCase):
+
+    def setUp(self):
+        self.kea = DHCP4CB('dbname=kea', api_url='http://kea:8000/')
+        self.kea.api = Mock()
+
+    def test_01_move_to_foreign_held_ip_keeps_old_row(self):
+        hosts_rows = [
+            (100, _ip('10.0.0.4'), 'pc.lan',
+             '{"netbox_ip_address_id": 200}', MAC, 0),
+            (100, _ip('10.0.0.7'), 'alien', None, MAC, 0),
+        ]
+        cursor = _FakeCursor([hosts_rows])
+        self.kea._connect = lambda: _FakeConn(cursor)
+        desired = [{
+            'id': 100, 'subnet': '10.0.0.0/24', 'pools': [],
+            'reservations': [
+                {'ip-address': '10.0.0.7', 'hostname': 'pc.lan',
+                 'hw-address': '11:22:33:44:55:66',
+                 'user-context': {'netbox_ip_address_id': 200}}]}]
+        self.kea._reconcile_reservations(desired)
+        # the old, working reservation survives; nothing added
+        self.kea.api.del_reservation.assert_not_called()
+        self.kea.api.add_reservation.assert_not_called()
+
+    def test_02_mac_case_difference_is_not_a_change(self):
+        hosts_rows = [(100, _ip('10.0.0.5'), 'pc.lan',
+                       '{"netbox_ip_address_id": 200}', MAC, 0)]
+        cursor = _FakeCursor([hosts_rows])
+        self.kea._connect = lambda: _FakeConn(cursor)
+        desired = [{
+            'id': 100, 'subnet': '10.0.0.0/24', 'pools': [],
+            'reservations': [
+                {'ip-address': '10.0.0.5', 'hostname': 'pc.lan',
+                 'hw-address': '11:22:33:44:55:66'.upper(),
+                 'user-context': {'netbox_ip_address_id': 200}}]}]
+        self.kea._reconcile_reservations(desired)
+        self.kea.api.del_reservation.assert_not_called()
+        self.kea.api.add_reservation.assert_not_called()
+
+
 class TestDHCP4APIReservationCommands(unittest.TestCase):
 
     def setUp(self):

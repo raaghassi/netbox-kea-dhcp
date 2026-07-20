@@ -237,7 +237,7 @@ class DHCP4App:
                             logging.info(
                                 f'reservation {ipaddr_id}: MAC changed, '
                                 f'deleting stale lease for {ip}')
-                            self.api.del_lease4(ip)
+                            self._evict_lease(ip)
                 break
 
         def raise_conflict(r):
@@ -261,8 +261,15 @@ class DHCP4App:
                 if r[USR_CTX][IP_ADDR] == ipaddr_id:
                     ip = r.get('ip-address')
                     if ip:
-                        self.api.del_lease4(ip)
+                        self._evict_lease(ip)
         self._del_prefix_item(RESAS, IP_ADDR, ipaddr_id)
+
+    def _evict_lease(self, ip):
+        """Delete the lease for a reserved IP so Kea can hand it to the new
+        MAC. Applied immediately here; subclasses with a staged push phase
+        override this to defer the live mutation until push."""
+
+        self.api.del_lease4(ip)
 
     def _set_subnet_item(self, prefix_id, item_list, item_key, item_id, new,
                          raise_conflict, display):
