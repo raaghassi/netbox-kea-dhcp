@@ -67,8 +67,8 @@ class TestKea(unittest.TestCase):
         self.kea.push()
         calls = [call('config-test', {'Dhcp4': newconf}),
                  call('config-set', {'Dhcp4': newconf}),
-                 call('config-write', {'Dhcp4': newconf})]
-        self.req.has_calls(calls)
+                 call('config-write')]
+        self.req.assert_has_calls(calls)
         self.assertEqual(self.srv_conf['Dhcp4'], newconf)
         self.assertEqual(self.kea.conf, self.kea.commit_conf)
 
