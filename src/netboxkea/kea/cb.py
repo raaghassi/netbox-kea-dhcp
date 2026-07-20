@@ -112,6 +112,9 @@ class DHCP4CB(DHCP4App):
 
         self.conf = {SUBNETS: list(subnets.values())}
         self.commit_conf = deepcopy(self.conf)
+        # A pull resynchronizes from the DB: any staged-but-unpushed commit
+        # is now stale, so discard it (pull acts as rollback).
+        self._has_commit = False
 
     def commit(self):
         """Record the working conf. No control-agent validation — Kea validates

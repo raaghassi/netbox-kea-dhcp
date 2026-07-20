@@ -5,9 +5,25 @@ from .connector import Connector
 from .ddns import DdnsManager
 from .kea.app import DHCP4App
 from .kea.cb import DHCP4CB
-from .listener import WebhookListener
 from .logger import init_logger
 from .netbox import NetboxApp
+
+
+def build_kea_backends(conf):
+    """Build the Kea backend(s) from config. Returns (kea, default_tag):
+    a {tag: backend} registry when kea_servers is set — config backend
+    (direct DB) when 'db' is set, else control agent via the instance's
+    HTTP control socket — or the legacy single backend with no tag routing
+    (default_tag None). 'db' wins over 'url', matching legacy kea_db
+    precedence."""
+
+    if conf.kea_servers:
+        kea = {
+            tag: DHCP4CB(spec['db']) if spec.get('db') else DHCP4App(spec['url'])
+            for tag, spec in conf.kea_servers.items()}
+        return kea, conf.default_server_tag
+    return (DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url),
+            None)
 
 
 def run():
@@ -19,22 +35,14 @@ def run():
         conf.netbox_url, conf.netbox_token, prefix_filter=conf.prefix_filter,
         iprange_filter=conf.iprange_filter,
         ipaddress_filter=conf.ipaddress_filter)
-    # tag -> backend registry: config backend (direct DB) when 'db' is set,
-    # else control agent via the instance's HTTP control socket. Legacy
-    # single-server settings build a one-entry registry with no tag routing.
-    if conf.kea_servers:
-        kea = {
-            tag: DHCP4CB(spec['db']) if spec.get('db') else DHCP4App(spec['url'])
-            for tag, spec in conf.kea_servers.items()}
-        default_tag = conf.default_server_tag
+    kea, default_tag = build_kea_backends(conf)
+    if isinstance(kea, dict):
         logging.info(
             f'netbox: {conf.netbox_url}, kea servers: {", ".join(kea)} '
             f'(default tag: {default_tag})')
     else:
         kea_target = conf.kea_db if conf.kea_db else conf.kea_url
         logging.info(f'netbox: {conf.netbox_url}, kea: {kea_target}')
-        kea = DHCP4CB(conf.kea_db) if conf.kea_db else DHCP4App(conf.kea_url)
-        default_tag = None
     # Optional: manage kea-dhcp-ddns (D2) forward/reverse-ddns zones from netbox-dns.
     ddns = None
     if conf.ddns_d2_url:
@@ -60,6 +68,10 @@ def run():
 
     # Start listening for events
     if conf.listen:
+        # Deferred: bottle (pinned 0.12) imports stdlib cgi, removed in
+        # python 3.13+, so importing the listener at module level makes the
+        # whole package unimportable there. Only listen mode needs it.
+        from .listener import WebhookListener
         logging.info(f'Listen for events on {conf.bind}:{conf.port}')
         server = WebhookListener(
             connector=conn, host=conf.bind, port=conf.port, secret=conf.secret,

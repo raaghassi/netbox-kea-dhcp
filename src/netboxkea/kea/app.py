@@ -71,6 +71,9 @@ class DHCP4App:
                 p.setdefault(USR_CTX, {}).setdefault(IP_RANGE, None)
 
         self.commit_conf = deepcopy(self.conf)
+        # A pull resynchronizes from the server: any staged-but-unpushed
+        # commit is now stale, so discard it (pull acts as rollback).
+        self._has_commit = False
         self.ip_uniqueness = self.conf.get('ip-reservations-unique', True)
 
     def commit(self):

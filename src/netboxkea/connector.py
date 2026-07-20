@@ -86,13 +86,16 @@ class Connector:
         self.ddns = ddns
         self.tag_field = tag_field
 
+    def _tag_for_prefix(self, pref):
+        cf = getattr(pref, 'custom_fields', None) or {}
+        return str(cf.get(self.tag_field) or self.default_tag).strip().lower()
+
     def _backend_for_prefix(self, pref):
-        """Resolve the backend serving this prefix. None means skip it."""
+        """Resolve the backend serving this prefix. None means unknown tag."""
 
         if self.default_tag is None:
             return next(iter(self.backends.values()))
-        cf = getattr(pref, 'custom_fields', None) or {}
-        tag = str(cf.get(self.tag_field) or self.default_tag).strip().lower()
+        tag = self._tag_for_prefix(pref)
         kea = self.backends.get(tag)
         if kea is None:
             logging.warning(
@@ -115,13 +118,18 @@ class Connector:
             kea.del_all_subnets()
 
         # Create DHCP configuration for each prefix
-        all_failed = None
+        unknown = {}
+        stats = {}  # id(backend) -> [attempted, succeeded]
         for p in self.nb.all_prefixes():
             kea = self._backend_for_prefix(p)
             if kea is None:
+                # Unknown tag: the prefix exists in NetBox but routes
+                # nowhere. Pushing now would drop it from live DHCP, so
+                # collect for the abort below.
+                unknown.setdefault(self._tag_for_prefix(p), []).append(str(p))
                 continue
-            if all_failed is None:
-                all_failed = True
+            counters = stats.setdefault(id(kea), [0, 0])
+            counters[0] += 1
             pl = f'prefix {p}: '
             logging.debug(f'{pl}generate DHCP config')
             # Speed up things by disabling auto-commit
@@ -148,12 +156,37 @@ class Connector:
                         logging.error(f'{pl}config failed. Error: {e}')
                         continue
 
-            all_failed = False
+            counters[1] += 1
 
         for kea in self.backends.values():
             kea.auto_commit = True
-        if all_failed is not True:
-            self.push_to_dhcp()
+
+        if unknown:
+            logging.error(
+                'full sync aborted before push: prefixes with unknown '
+                f'{self.tag_field} tags would have been dropped from live '
+                f'DHCP: {unknown}. Fix the tags or add kea_servers entries.')
+            # Discard the staged wipe on every backend so a later
+            # event-driven push cannot apply it either.
+            self.reload_dhcp_config()
+            return
+
+        if self.check:
+            logging.info('check mode on: config will NOT be pushed to server')
+            return
+
+        for tag, kea in self.backends.items():
+            attempted, succeeded = stats.get(id(kea), (0, 0))
+            if attempted and not succeeded:
+                # Same protective intent as the pre-registry all_failed
+                # guard, per backend: don't replace a live config with the
+                # staged near-empty one when every prefix failed.
+                logging.error(
+                    f'backend "{tag or "default"}": every prefix failed, '
+                    'discarding staged config instead of pushing')
+                kea.pull()
+                continue
+            kea.push()
 
     def push_to_dhcp(self):
         if self.check:

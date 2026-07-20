@@ -72,6 +72,15 @@ class TestKea(unittest.TestCase):
         self.assertEqual(self.srv_conf['Dhcp4'], newconf)
         self.assertEqual(self.kea.conf, self.kea.commit_conf)
 
+    def test_05_pull_discards_staged_commit(self):
+        self._set_std_subnet()
+        self.kea.commit()
+        self.req.reset_mock()
+        self.kea.pull()
+        self.kea.push()
+        cmds = [c.args[0] for c in self.req.call_args_list]
+        self.assertNotIn('config-set', cmds)
+
     def test_10_set_subnet(self):
         expected = {'subnet4': [
             {'id': 100, 'subnet': '192.168.0.0/24', 'pools': [],

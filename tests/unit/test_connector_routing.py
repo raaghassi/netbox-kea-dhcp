@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from pynetbox.models.ipam import Prefixes
 
 from netboxkea.connector import Connector
+from netboxkea.kea.exceptions import KeaCmdError
 
 api = Mock(base_url='http://netbox')
 
@@ -96,6 +97,40 @@ class TestConnectorRouting(unittest.TestCase):
         self.conn.reload_dhcp_config()
         self.kea_svcs.pull.assert_called_once_with()
         self.kea_site.pull.assert_called_once_with()
+
+    def test_09_sync_all_unknown_tag_aborts_push(self):
+        # An unknown-tag prefix during full sync means pushing would drop
+        # it from live DHCP: no backend may be pushed, staged wipe discarded
+        self.nb.all_prefixes.return_value = iter([
+            _prefix(100, '10.0.0.0/24'),
+            _prefix(102, '10.2.0.0/24', 'ctrl')])
+        self.conn.sync_all()
+        for kea in (self.kea_svcs, self.kea_site):
+            kea.push.assert_not_called()
+            self.assertEqual(kea.pull.call_count, 2)  # initial + rollback
+
+    def test_10_sync_all_zero_prefix_backend_still_syncs_empty(self):
+        # A backend legitimately owning no prefixes converges to empty:
+        # declarative semantics, provided no tags are unknown
+        self.nb.all_prefixes.return_value = iter([
+            _prefix(100, '10.0.0.0/24')])
+        self.conn.sync_all()
+        self.kea_site.del_all_subnets.assert_called_once_with()
+        self.kea_site.set_subnet.assert_not_called()
+        self.kea_site.push.assert_called_once_with()
+        self.kea_svcs.push.assert_called_once_with()
+
+    def test_11_sync_all_backend_with_all_failures_not_pushed(self):
+        # Per-backend all-failed guard: the healthy backend still pushes,
+        # the failing one is rolled back instead of being wiped
+        self.kea_site.set_subnet.side_effect = KeaCmdError('boom')
+        self.nb.all_prefixes.return_value = iter([
+            _prefix(100, '10.0.0.0/24'),
+            _prefix(101, '10.1.0.0/24', 'site-a')])
+        self.conn.sync_all()
+        self.kea_svcs.push.assert_called_once_with()
+        self.kea_site.push.assert_not_called()
+        self.assertEqual(self.kea_site.pull.call_count, 2)  # + rollback
 
 
 class TestConnectorLegacyMode(unittest.TestCase):
