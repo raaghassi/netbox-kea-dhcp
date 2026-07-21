@@ -60,7 +60,8 @@ kea_url = "http://10.94.135.209:8000/"
 # else) and reflects ACTIVE leases as status=dhcp IPs, description-tagged
 # '[name]' so each source reconciles only its own records. NEVER writes
 # to Kea — deliberately distinct from kea_servers, whose entries are sync
-# targets and converge to what NetBox defines.
+# targets and converge to what NetBox defines. lease_sources ride
+# alongside a sync target (kea_url/kea_db/kea_servers is still required).
 #
 #[lease_sources.narwhal]
 #url = "http://192.0.2.1:8000/"

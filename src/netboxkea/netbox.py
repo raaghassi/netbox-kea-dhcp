@@ -49,13 +49,14 @@ class NetboxApp:
     # statically-seeded reservations are never touched. ---
 
     def upsert_dhcp_ip(self, address, dns_name=None, description=None):
-        """Create or update a DHCP-lease IP (status=dhcp). Idempotent on the
-        address; matches/creates only status=dhcp objects."""
-        data = {'status': 'dhcp'}
-        if dns_name:
-            data['dns_name'] = dns_name
-        if description:
-            data['description'] = description
+        """Create or update a DHCP-lease IP (status=dhcp). Idempotent on
+        the address; matches/creates only status=dhcp objects. Reflection
+        semantics: dns_name/description mirror the CURRENT lease state, so
+        None clears a previously-set value (a lease that stopped sending a
+        hostname must not keep the stale name — and the poller's
+        change-detection would otherwise re-upsert every cycle forever)."""
+        data = {'status': 'dhcp', 'dns_name': dns_name or '',
+                'description': description or ''}
         existing = next(iter(self.nb.ipam.ip_addresses.filter(
             address=address, status='dhcp')), None)
         if existing:

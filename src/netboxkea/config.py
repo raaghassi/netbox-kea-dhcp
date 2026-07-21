@@ -189,7 +189,10 @@ def _normalize_lease_sources(raw):
             _fatal(f'lease_sources.{nname}: "username" set without '
                    '"password" or "password_env"')
         interval = spec.get('interval', 60)
-        if not isinstance(interval, int) or interval < 1:
+        # bool is an int subclass: `interval = true` would otherwise pass
+        # and poll every 1 second
+        if not isinstance(interval, int) or isinstance(interval, bool) \
+                or interval < 1:
             _fatal(f'lease_sources.{nname}: "interval" must be a positive '
                    'integer (seconds)')
         spec['interval'] = interval
@@ -278,7 +281,9 @@ def get_config():
         logging.fatal(
             'Either "kea_url" (control agent), "kea_db" (config backend DSN) '
             'or a "kea_servers" registry must be set, on command line '
-            'arguments or in the config file')
+            'arguments or in the config file (lease_sources alone is not '
+            'sufficient — observation-only sources ride alongside a sync '
+            'target)')
         sys.exit(1)
 
     # Resolve legacy/D2 password_env settings the same way as registry

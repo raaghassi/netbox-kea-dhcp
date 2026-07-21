@@ -40,8 +40,12 @@ class FileAPI:
 
 
 class DHCP4API:
-    def __init__(self, url, username=None, password=None):
+    def __init__(self, url, username=None, password=None, timeout=15):
         self.url = url
+        # Bounded requests (ddns.py convention): the lease pollers run
+        # this client in unsupervised daemon threads, where a hung socket
+        # would otherwise stall reflection forever without a log line.
+        self.timeout = timeout
         self.session = requests.Session()
         if username:
             # session-level HTTP basic auth (requests: s.auth = tuple);
@@ -56,7 +60,8 @@ class DHCP4API:
         if arguments:
             payload['arguments'] = arguments
         try:
-            r = self.session.post(self.url, json=payload)
+            r = self.session.post(self.url, json=payload,
+                                  timeout=self.timeout)
             r.raise_for_status()
             rj = r.json()
         except requests.exceptions.RequestException as e:
@@ -115,7 +120,8 @@ class DHCP4API:
                                  'ip-address': ip_address,
                                  'operation-target': 'database'}}
         try:
-            r = self.session.post(self.url, json=payload)
+            r = self.session.post(self.url, json=payload,
+                                  timeout=self.timeout)
             r.raise_for_status()
             rj = r.json()
         except requests.exceptions.RequestException as e:
@@ -140,7 +146,8 @@ class DHCP4API:
         payload = {'command': 'lease4-get-page', 'service': ['dhcp4'],
                    'arguments': {'from': from_, 'limit': limit}}
         try:
-            r = self.session.post(self.url, json=payload)
+            r = self.session.post(self.url, json=payload,
+                                  timeout=self.timeout)
             r.raise_for_status()
             rj = r.json()
         except requests.exceptions.RequestException as e:
@@ -161,7 +168,8 @@ class DHCP4API:
         payload = {'command': 'lease4-del', 'service': ['dhcp4'],
                    'arguments': {'ip-address': ip_address}}
         try:
-            r = self.session.post(self.url, json=payload)
+            r = self.session.post(self.url, json=payload,
+                                  timeout=self.timeout)
             r.raise_for_status()
             rj = r.json()
         except requests.exceptions.RequestException as e:

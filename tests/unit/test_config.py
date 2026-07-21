@@ -228,6 +228,23 @@ url = "http://fw:8000/"
 interval = 0
 ''')
 
+    def test_21b_lease_sources_bool_interval_fatal(self):
+        # bool is an int subclass; `interval = true` would poll at 1s
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+[lease_sources.narwhal]
+url = "http://fw:8000/"
+interval = true
+''')
+
+    def test_21c_lease_sources_alone_is_not_a_kea_target(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+[lease_sources.narwhal]
+url = "http://fw:8000/"
+''')
+
     def test_22_lease_sources_password_env(self):
         with patch.dict(os.environ, {'FW_PW': 's3cret'}):
             conf = _get_config(BASE + '''
