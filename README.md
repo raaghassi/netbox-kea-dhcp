@@ -1,6 +1,18 @@
 netbox-kea-dhcp
 ===============
 
+> **⚠ DEPRECATED — merged into the netbox-kea plugin.**
+>
+> This standalone sync daemon has been merged into a fork of the
+> [netbox-kea](https://github.com/devon-mar/netbox-kea) NetBox plugin at
+> **[raaghassi/netbox-kea](https://github.com/raaghassi/netbox-kea)**, where the
+> sync engine lives on as the `keasync` package driven by the in-process
+> `kea_sync_daemon` management command (ORM + Django signals instead of the
+> pynetbox/webhook/TOML model here). The instance registry moved to netbox_kea
+> `Server` rows. This repository is archived read-only for history; all new work
+> happens in the merged plugin. Rationale + design:
+> `workspace/docs/infrastructure/netbox-kea-plugin-merge-design.md`.
+
 [![PyPI](https://img.shields.io/pypi/v/netbox-kea-dhcp)](https://pypi.org/project/netbox-kea-dhcp/)
 
 Enable use of [NetBox](https://github.com/netbox-community/netbox) as a subnet
