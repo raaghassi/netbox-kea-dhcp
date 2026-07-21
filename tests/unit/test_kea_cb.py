@@ -300,6 +300,30 @@ class TestDHCP4APIReservationCommands(unittest.TestCase):
         self._respond(0, 'Host deleted.')
         self.api.del_reservation(100, '10.0.0.5')
 
+    def test_07_get_leases_page_ok(self):
+        resp = Mock()
+        resp.raise_for_status = Mock()
+        resp.json.return_value = [{
+            'result': 0, 'text': '1 IPv4 lease(s) found.',
+            'arguments': {'leases': [{'ip-address': '10.0.0.5',
+                                      'state': 0}]}}]
+        self.api.session.post.return_value = resp
+        leases = self.api.get_leases_page('start', 1024)
+        self.assertEqual(leases, [{'ip-address': '10.0.0.5', 'state': 0}])
+        args = self.api.session.post.call_args
+        self.assertEqual(args.kwargs['json']['command'], 'lease4-get-page')
+        self.assertEqual(args.kwargs['json']['arguments'],
+                         {'from': 'start', 'limit': 1024})
+
+    def test_08_get_leases_page_empty_result3(self):
+        self._respond(3, '0 IPv4 lease(s) found.')
+        self.assertEqual(self.api.get_leases_page('start', 1024), [])
+
+    def test_09_get_leases_page_error_raises(self):
+        self._respond(1, 'malformed')
+        with self.assertRaises(KeaCmdError):
+            self.api.get_leases_page('start', 1024)
+
     def test_05_basic_auth_set_on_session(self):
         api = DHCP4API('http://kea:8000/', username='syncer',
                        password='s3cret')

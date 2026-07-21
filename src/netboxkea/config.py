@@ -51,6 +51,12 @@ class Config:
     default_server_tag: str = None
     # NetBox custom field on prefixes naming the serving Kea tag.
     server_tag_custom_field: str = 'kea_server'
+    # Observation-only lease sources: {name: {url, username?, password?/
+    # password_env?, interval?}}. Each is polled (lease4-get-page) and its
+    # active leases reflected as status=dhcp IPs tagged '[name]'. Distinct
+    # from kea_servers ON PURPOSE: these are never sync targets and can
+    # never be written to (e.g. an OPNsense-owned Kea).
+    lease_sources: dict = field(default_factory=dict)
     netbox_url: str = None
     netbox_token: str = None
     prefix_filter: dict = field(default_factory=lambda: {
@@ -147,6 +153,48 @@ def _normalize_kea_servers(raw):
             seen_dsn[dsn] = ntag
         servers[ntag] = spec
     return servers
+
+
+def _normalize_lease_sources(raw):
+    """Validate and normalize the lease_sources table. Exits on bad
+    config. Same credential rules as kea_servers entries."""
+
+    if not isinstance(raw, dict) or not raw:
+        _fatal('Setting "lease_sources" must be a non-empty table of '
+               'name -> {url = "...", ...} entries')
+    sources = {}
+    for name, spec in raw.items():
+        nname = str(name).strip().lower()
+        if not nname:
+            _fatal('lease_sources: empty source name')
+        if nname in sources:
+            _fatal(f'lease_sources: duplicate name "{nname}"')
+        if not isinstance(spec, dict):
+            _fatal(f'lease_sources.{nname}: entry must be a table')
+        unknown = set(spec) - {'url', 'username', 'password',
+                               'password_env', 'interval'}
+        if unknown:
+            _fatal(f'lease_sources.{nname}: unknown keys {sorted(unknown)}')
+        if not spec.get('url'):
+            _fatal(f'lease_sources.{nname}: "url" (HTTP control socket) '
+                   'is required')
+        spec = dict(spec)
+        if spec.get('password_env'):
+            if spec.get('password'):
+                _fatal(f'lease_sources.{nname}: "password" and '
+                       '"password_env" are mutually exclusive')
+            spec['password'] = _password_from_env(
+                spec.pop('password_env'), f'lease_sources.{nname}')
+        if spec.get('username') and 'password' not in spec:
+            _fatal(f'lease_sources.{nname}: "username" set without '
+                   '"password" or "password_env"')
+        interval = spec.get('interval', 60)
+        if not isinstance(interval, int) or interval < 1:
+            _fatal(f'lease_sources.{nname}: "interval" must be a positive '
+                   'integer (seconds)')
+        spec['interval'] = interval
+        sources[nname] = spec
+    return sources
 
 
 def get_config():
@@ -247,6 +295,10 @@ def get_config():
             _fatal(f'"{user_key}" set without "{pw_key}" or '
                    f'"{pw_key}_env" — set {pw_key} = "" explicitly if an '
                    'empty password is intended')
+
+    if 'lease_sources' in settings:
+        settings['lease_sources'] = _normalize_lease_sources(
+            settings['lease_sources'])
 
     conf = Config(**settings)
 

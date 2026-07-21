@@ -1,13 +1,14 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from netboxkea.entry_point import build_ddns, build_kea_backends
+from netboxkea.entry_point import (build_ddns, build_kea_backends,
+                                   build_lease_pollers)
 
 
 def _conf(**kw):
     defaults = {'kea_servers': {}, 'kea_url': None, 'kea_db': None,
                 'default_server_tag': None, 'kea_username': None,
-                'kea_password': None}
+                'kea_password': None, 'lease_sources': {}}
     defaults.update(kw)
     conf = Mock()
     for k, v in defaults.items():
@@ -102,3 +103,24 @@ class TestBuildDdns(unittest.TestCase):
         ddns.assert_called_once_with(
             'http://nb', 'tok', 'http://d2:8001/', username='syncer',
             password='s3cret')
+
+
+@patch('netboxkea.entry_point.NetboxApp')
+@patch('netboxkea.entry_point.LeasePoller')
+class TestBuildLeasePollers(unittest.TestCase):
+
+    def test_01_builds_with_creds_and_own_netbox(self, lp, nba):
+        conf = _conf(netbox_url='http://nb', netbox_token='tok',
+                     lease_sources={'narwhal': {
+                         'url': 'http://fw:8000/', 'username': 'u',
+                         'password': 'p', 'interval': 30}})
+        pollers = build_lease_pollers(conf)
+        self.assertEqual(len(pollers), 1)
+        nba.assert_called_once_with('http://nb', 'tok')
+        lp.assert_called_once_with(
+            'narwhal', 'http://fw:8000/', nba.return_value,
+            username='u', password='p', interval=30)
+
+    def test_02_none_configured(self, lp, nba):
+        self.assertEqual(build_lease_pollers(_conf()), [])
+        lp.assert_not_called()

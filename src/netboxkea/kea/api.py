@@ -130,6 +130,31 @@ class DHCP4API:
         else:
             raise KeaCmdError(f'command "reservation-del" returns "{text}"')
 
+    def get_leases_page(self, from_, limit):
+        """One page of leases (lease4-get-page; the ARM warns lease4-get-all
+        can hang the server on large databases). from_ is 'start' for the
+        first page, then the last address of the previous page. Returns []
+        on result 3 ('empty'). The page is the last one when fewer than
+        limit leases come back."""
+
+        payload = {'command': 'lease4-get-page', 'service': ['dhcp4'],
+                   'arguments': {'from': from_, 'limit': limit}}
+        try:
+            r = self.session.post(self.url, json=payload)
+            r.raise_for_status()
+            rj = r.json()
+        except requests.exceptions.RequestException as e:
+            raise KeaServerError(f'API error: {e}')
+        assert len(rj) == 1
+        rj = rj.pop(0)
+        result = rj['result']
+        if result == 0:
+            return rj.get('arguments', {}).get('leases', [])
+        if result == 3:
+            return []
+        raise KeaCmdError(
+            f'command "lease4-get-page" returns "{rj.get("text")}"')
+
     def del_lease4(self, ip_address):
         """ Delete an IPv4 lease. Ignores non-existent leases (result 3). """
 

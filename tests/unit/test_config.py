@@ -202,6 +202,54 @@ kea_password = ""
 ''')
         self.assertEqual(conf.kea_password, '')
 
+    def test_19_lease_sources_parse_and_defaults(self):
+        conf = _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+[lease_sources.Narwhal]
+url = "http://fw:8000/"
+''')
+        self.assertEqual(conf.lease_sources, {
+            'narwhal': {'url': 'http://fw:8000/', 'interval': 60}})
+
+    def test_20_lease_sources_url_required(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+[lease_sources.narwhal]
+interval = 30
+''')
+
+    def test_21_lease_sources_bad_interval_fatal(self):
+        with self.assertRaises(SystemExit):
+            _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+[lease_sources.narwhal]
+url = "http://fw:8000/"
+interval = 0
+''')
+
+    def test_22_lease_sources_password_env(self):
+        with patch.dict(os.environ, {'FW_PW': 's3cret'}):
+            conf = _get_config(BASE + '''
+kea_url = "http://kea:8000/"
+[lease_sources.narwhal]
+url = "http://fw:8000/"
+username = "syncer"
+password_env = "FW_PW"
+''')
+        self.assertEqual(conf.lease_sources['narwhal']['password'], 's3cret')
+
+    def test_23_lease_sources_coexist_with_registry(self):
+        conf = _get_config(BASE + '''
+default_server_tag = "svcs"
+[kea_servers.svcs]
+url = "http://kea:8000/"
+[lease_sources.narwhal]
+url = "http://fw:8000/"
+''')
+        self.assertIn('narwhal', conf.lease_sources)
+        self.assertIn('svcs', conf.kea_servers)
+
     def test_09_registry_excludes_legacy_settings(self):
         with self.assertRaises(SystemExit):
             _get_config(BASE + '''

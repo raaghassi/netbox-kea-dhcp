@@ -53,6 +53,22 @@ kea_url = "http://10.94.135.209:8000/"
 #[kea_servers.site-a]
 #url = "http://kea.site-a.lan:8000/"
 
+# Observation-only lease sources — Kea instances whose configuration is
+# owned ELSEWHERE (e.g. an OPNsense-managed firewall) but whose leases
+# should be visible in NetBox. Polls lease4-get-page over the control
+# channel (requires libdhcp_lease_cmds.so loaded on that Kea; nothing
+# else) and reflects ACTIVE leases as status=dhcp IPs, description-tagged
+# '[name]' so each source reconciles only its own records. NEVER writes
+# to Kea — deliberately distinct from kea_servers, whose entries are sync
+# targets and converge to what NetBox defines.
+#
+#[lease_sources.narwhal]
+#url = "http://192.0.2.1:8000/"
+#username = "netbox-kea-sync"
+#password_env = "KEA_NARWHAL_CTRL_PASSWORD"
+## poll interval, seconds (default 60)
+#interval = 60
+
 #log_level = "debug"          # or "info", "warning" (default), "error"
 #ext_log_level = "warning"    # Log level for external modules
 

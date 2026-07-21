@@ -1,10 +1,12 @@
 import logging
+import threading
 
 from .config import get_config
 from .connector import Connector
 from .ddns import DdnsManager
 from .kea.app import DHCP4App
 from .kea.cb import DHCP4CB
+from .lease_poller import LeasePoller
 from .logger import init_logger
 from .netbox import NetboxApp
 
@@ -45,6 +47,20 @@ def build_ddns(conf):
                        password=conf.ddns_d2_password)
 
 
+def build_lease_pollers(conf):
+    """Build observation-only lease pollers. Each gets its OWN NetboxApp:
+    pollers run in threads beside the webhook listener and requests
+    sessions aren't shared across threads."""
+
+    return [
+        LeasePoller(name, spec['url'],
+                    NetboxApp(conf.netbox_url, conf.netbox_token),
+                    username=spec.get('username'),
+                    password=spec.get('password'),
+                    interval=spec['interval'])
+        for name, spec in conf.lease_sources.items()]
+
+
 def run():
     conf = get_config()
     init_logger(conf.log_level, conf.ext_log_level, conf.syslog_level_prefix)
@@ -74,6 +90,8 @@ def run():
     if not conf.full_sync_at_startup and not conf.listen:
         logging.warning('Neither full sync nor listen mode has been asked')
 
+    pollers = build_lease_pollers(conf)
+
     # Start a full synchronisation
     if conf.full_sync_at_startup:
         logging.info('Start full sync')
@@ -83,9 +101,19 @@ def run():
                 ddns.sync()
             except Exception as e:
                 logging.error(f'initial D2 ddns sync failed: {e}')
+        for p in pollers:
+            try:
+                p.sync_once()
+            except Exception as e:
+                logging.error(f'initial lease poll ({p.name}) failed: {e}')
 
     # Start listening for events
     if conf.listen:
+        for p in pollers:
+            logging.info(
+                f'lease-poll: observing {p.name} every {p.interval}s')
+            threading.Thread(target=p.run_forever, daemon=True,
+                             name=f'lease-poll-{p.name}').start()
         # Deferred: bottle (pinned 0.12) imports stdlib cgi, removed in
         # python 3.13+, so importing the listener at module level makes the
         # whole package unimportable there. Only listen mode needs it.

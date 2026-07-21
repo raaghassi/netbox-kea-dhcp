@@ -69,3 +69,7 @@ class NetboxApp:
         for ip in self.nb.ipam.ip_addresses.filter(
                 address=address, status='dhcp'):
             ip.delete()
+
+    def dhcp_ips(self):
+        """All status=dhcp IP addresses (the lease-reflection population)."""
+        return self.nb.ipam.ip_addresses.filter(status='dhcp')
